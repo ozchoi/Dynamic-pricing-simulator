@@ -83,6 +83,13 @@ function roundToNearest(value: number, nearest: number) {
   return Math.round(value / nearest) * nearest;
 }
 
+function roundToSignificantFigures(value: number, figures: number) {
+  if (!value) return 0;
+  const magnitude = Math.floor(Math.log10(Math.abs(value)));
+  const scale = 10 ** (magnitude - figures + 1);
+  return Math.round(value / scale) * scale;
+}
+
 function probabilityForStage(source: SourceProbability | undefined, parentStatus: string, trialOutcome: string) {
   const p = source ?? {
     source: "Default",
@@ -118,6 +125,14 @@ function tutorHourlyCost(tier: string | undefined) {
   return matchedTier ? TUTOR_HOURLY_COSTS[matchedTier] : TUTOR_HOURLY_COSTS.Core;
 }
 
+function isGroupFormat(format: string | undefined) {
+  return String(format).toLowerCase() === "group";
+}
+
+function classStudentCount(inputs: PricingInputs) {
+  return isGroupFormat(inputs.format) ? Math.max(1, Math.ceil(inputs.currentStudents || 1)) : 1;
+}
+
 function formatCandidates(format: string | undefined) {
   if (!format) return ["Group", "1"];
   const normalized = String(format).trim();
@@ -126,7 +141,7 @@ function formatCandidates(format: string | undefined) {
 }
 
 function isHkdseGroup(inputs: PricingInputs) {
-  return inputs.programme.toUpperCase() === "HKDSE" && String(inputs.format).toLowerCase() === "group";
+  return inputs.programme.toUpperCase() === "HKDSE" && isGroupFormat(inputs.format);
 }
 
 function hkdseCapacityStep(currentStudents: number) {
@@ -144,14 +159,25 @@ function lookupPriceRow(data: WorkbookData, programme: string, formats: string[]
 function hkdseCapacityPricing(inputs: PricingInputs, data: WorkbookData) {
   if (!isHkdseGroup(inputs)) return null;
 
+  const capacityStep = Number(hkdseCapacityStep(inputs.currentStudents));
   const baseRow = lookupPriceRow(data, inputs.programme, ["1"]);
-  const capacityRow = lookupPriceRow(data, inputs.programme, [hkdseCapacityStep(inputs.currentStudents)]);
+  const capacityRow = lookupPriceRow(data, inputs.programme, [String(capacityStep)]);
+  const previousCapacityRow = capacityStep > 1 ? lookupPriceRow(data, inputs.programme, [String(capacityStep - 1)]) : null;
   if (!baseRow || !capacityRow || !baseRow.basePrice) return null;
+
+  const currentTotalRevenue = capacityRow.basePrice * capacityStep;
+  const previousTotalRevenue = previousCapacityRow ? previousCapacityRow.basePrice * (capacityStep - 1) : 0;
+  const marginalPrice = currentTotalRevenue - previousTotalRevenue;
+  const factor = marginalPrice / baseRow.basePrice;
+  const minPrice = baseRow.minPrice === null ? null : roundToSignificantFigures(baseRow.minPrice * factor, 2);
+  const maxPrice = baseRow.maxPrice === null ? null : roundToSignificantFigures(baseRow.maxPrice * factor, 2);
 
   return {
     baseRow,
     capacityRow,
-    factor: capacityRow.basePrice / baseRow.basePrice
+    factor,
+    minPrice,
+    maxPrice
   };
 }
 
@@ -163,12 +189,12 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
   const basePrice = priceRow?.basePrice ?? null;
   const courseAdjustment = lookupCourseAdjustment(data.courseAdjustments, inputs.course);
   const adjustedBase = basePrice === null ? null : basePrice + courseAdjustment;
-  const minPrice = hkdseCapacity?.capacityRow.minPrice ?? priceRow?.minPrice ?? (basePrice === null ? null : basePrice * 0.85 + courseAdjustment);
+  const minPrice = hkdseCapacity?.minPrice ?? priceRow?.minPrice ?? (basePrice === null ? null : basePrice * 0.85 + courseAdjustment);
   const maxPrice =
-    hkdseCapacity?.capacityRow.maxPrice ??
+    hkdseCapacity?.maxPrice ??
     priceRow?.maxPrice ??
-    (hkdseCapacity?.capacityRow.basePrice
-      ? hkdseCapacity.capacityRow.basePrice * 1.25 + courseAdjustment
+    (hkdseCapacity && basePrice !== null
+      ? roundToSignificantFigures(basePrice * hkdseCapacity.factor * 1.25 + courseAdjustment, 2)
       : basePrice === null
         ? null
         : basePrice * 1.25 + courseAdjustment);
@@ -217,14 +243,17 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
   );
   const expectedLessons = DEFAULTS.expectedLessons;
   const hoursPerLesson = DEFAULTS.hoursPerLesson;
-  const expectedHours = inputs.expectedHoursOverride ?? priceRow?.expectedHours ?? expectedLessons * hoursPerLesson;
+  const classTeachingHours = inputs.expectedHoursOverride ?? priceRow?.expectedHours ?? expectedLessons * hoursPerLesson;
+  const studentCount = classStudentCount(inputs);
+  const expectedHours = classTeachingHours * studentCount;
   const expectedRevenue =
     recommendedPrice === null || expectedHours === null ? null : recommendedPrice * expectedHours * pLeadToEnrol * pRetention8Lessons;
   const rawTutorHourlyCost = tutorHourlyCost(inputs.teacherTier);
+  const classTutorHourlyCost = isGroupFormat(inputs.format) ? rawTutorHourlyCost + Math.max(0, studentCount - 1) * 50 : rawTutorHourlyCost;
   const fixedMarketingCost = inputs.fixedMarketingCostOverride ?? DEFAULTS.fixedMarketingCost;
-  const expectedTutorCost = expectedHours === null ? null : rawTutorHourlyCost * expectedHours * pLeadToEnrol * pRetention8Lessons;
+  const expectedTutorCost = classTutorHourlyCost * classTeachingHours * pLeadToEnrol * pRetention8Lessons;
   const expectedAdminCost =
-    DEFAULTS.adminCost * pLeadToEnrol + DEFAULTS.lessonAdminCost * expectedLessons * pLeadToEnrol * pRetention8Lessons;
+    DEFAULTS.adminCost * studentCount * pLeadToEnrol + DEFAULTS.lessonAdminCost * expectedLessons * studentCount * pLeadToEnrol * pRetention8Lessons;
   const expectedTotalCost =
     expectedTutorCost === null ? null : expectedTutorCost + expectedAdminCost + fixedMarketingCost;
   const expectedGrossProfit =
@@ -268,7 +297,7 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
     hoursPerLesson,
     expectedHours,
     expectedRevenue,
-    tutorHourlyCost: rawTutorHourlyCost,
+    tutorHourlyCost: classTutorHourlyCost,
     expectedTutorCost,
     expectedAdminCost,
     fixedMarketingCost,

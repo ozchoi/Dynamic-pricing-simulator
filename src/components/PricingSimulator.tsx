@@ -331,6 +331,11 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
   const netTone = getNetTone(result.expectedNetContribution);
   const priceDelta = result.adjustedBase === null || result.displayPrice === null ? null : result.displayPrice - result.adjustedBase;
   const isOverrideActive = inputs.priceOverride !== null || inputs.expectedHoursOverride !== null || inputs.fixedMarketingCostOverride !== null;
+  const sliderPrice = inputs.priceOverride ?? result.displayPrice ?? result.recommendedPrice ?? result.adjustedBase ?? 0;
+  const sliderMin = Math.max(0, Math.round((result.minPrice ?? sliderPrice * 0.7) / 10) * 10);
+  const sliderMax = Math.max(sliderMin + 10, Math.round((result.maxPrice ?? sliderPrice * 1.3) / 10) * 10);
+  const sliderValue = Math.max(sliderMin, Math.min(sliderMax, sliderPrice));
+  const quoteStudentCount = inputs.format === "Group" ? Math.max(1, Math.ceil(inputs.currentStudents || 1)) : 1;
 
   useEffect(() => {
     setSubmittedQuoteKeys(readSubmittedQuoteKeys());
@@ -465,6 +470,25 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
                   </span>
                 ) : null}
               </div>
+              <div className="mt-5 max-w-2xl rounded-md border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-700">Price sensitivity check</p>
+                  <p className="text-sm font-semibold text-slate-950">{formatCurrency(sliderPrice)} / hr</p>
+                </div>
+                <input
+                  className="mt-3 w-full accent-blue-700"
+                  type="range"
+                  min={sliderMin}
+                  max={sliderMax}
+                  step={10}
+                  value={sliderValue}
+                  onChange={(event) => update({ priceOverride: Number(event.target.value) })}
+                />
+                <div className="mt-2 flex justify-between text-xs text-slate-500">
+                  <span>{formatCurrency(sliderMin)}</span>
+                  <span>{formatCurrency(sliderMax)}</span>
+                </div>
+              </div>
               <p className="mt-3 text-base text-slate-700">{result.recommendedOffer}</p>
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 <Stat label="Guardrail Min" value={formatCurrency(result.minPrice)} />
@@ -517,10 +541,10 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             <div className="mt-2">
               <BreakdownRow label="Recommended price" value={`${formatCurrency(result.recommendedPrice)} / hr`} />
               <BreakdownRow label="Lesson plan" value={`${formatNumber(result.expectedLessons)} lessons`} detail={`${formatNumber(result.hoursPerLesson)} hours each`} />
-              <BreakdownRow label="Billable hours" value={formatNumber(result.expectedHours)} detail="2 hours x 8 lessons unless overridden" />
-              <BreakdownRow label="Expected revenue" value={formatCurrency(result.expectedRevenue)} detail="Hourly rate x billable hours x enrolment x retention" />
-              <BreakdownRow label="Tutor cost" value={formatCurrency(result.expectedTutorCost)} detail={`${formatCurrency(result.tutorHourlyCost)} / hr for ${inputs.teacherTier}`} />
-              <BreakdownRow label="Admin cost" value={formatCurrency(result.expectedAdminCost)} detail="HK$120 first enrolment + HK$30 per retained lesson" />
+              <BreakdownRow label="Billable hours" value={formatNumber(result.expectedHours)} detail={`2 hours x 8 lessons x ${formatNumber(quoteStudentCount)} student${quoteStudentCount === 1 ? "" : "s"}`} />
+              <BreakdownRow label="Expected revenue" value={formatCurrency(result.expectedRevenue)} detail="Hourly rate x billable student-hours x enrolment x retention" />
+              <BreakdownRow label="Tutor cost" value={formatCurrency(result.expectedTutorCost)} detail={`${formatCurrency(result.tutorHourlyCost)} / teaching hr for ${inputs.teacherTier}`} />
+              <BreakdownRow label="Admin cost" value={formatCurrency(result.expectedAdminCost)} detail="HK$120 per student + HK$30 per retained lesson per student" />
               <BreakdownRow label="Fixed marketing cost" value={formatCurrency(result.fixedMarketingCost)} />
               <BreakdownRow label="Total expected cost" value={formatCurrency(result.expectedTotalCost)} />
               <BreakdownRow label="Expected gross profit" value={formatCurrency(result.expectedGrossProfit)} />
