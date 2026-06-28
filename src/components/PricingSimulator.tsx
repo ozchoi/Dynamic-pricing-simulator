@@ -33,7 +33,14 @@ function numberOrBlank(value: number | null | undefined) {
   return value ?? "";
 }
 
-function buildQuoteRecord(inputs: PricingInputs, result: PricingResult, priceFeedback: number, sliderPrice: number, sliderResult: PricingResult) {
+function buildQuoteRecord(
+  inputs: PricingInputs,
+  result: PricingResult,
+  priceFeedback: number,
+  userSuggestedPrice: number | null,
+  sliderPrice: number,
+  sliderResult: PricingResult
+) {
   const savedAt = new Date().toISOString();
 
   return {
@@ -89,7 +96,8 @@ function buildQuoteRecord(inputs: PricingInputs, result: PricingResult, priceFee
     "Manual Price / Hr": numberOrBlank(inputs.priceOverride),
     "Fixed Marketing Cost Override": numberOrBlank(inputs.fixedMarketingCostOverride),
     "Price Feedback Score": priceFeedback,
-    "Price Feedback Label": feedbackLabel(priceFeedback)
+    "Price Feedback Label": feedbackLabel(priceFeedback),
+    "User Suggested Price / Hr": numberOrBlank(userSuggestedPrice)
   };
 }
 
@@ -113,7 +121,7 @@ function readSubmittedQuoteKeys() {
   }
 }
 
-function createQuoteKey(inputs: PricingInputs, result: PricingResult) {
+function createQuoteKey(inputs: PricingInputs, result: PricingResult, userSuggestedPrice: number | null) {
   return JSON.stringify({
     campaignSeason: inputs.campaignSeason ?? "",
     syllabus: inputs.programme,
@@ -132,6 +140,7 @@ function createQuoteKey(inputs: PricingInputs, result: PricingResult) {
     expectedHoursOverride: inputs.expectedHoursOverride ?? null,
     priceOverride: inputs.priceOverride ?? null,
     fixedMarketingCostOverride: inputs.fixedMarketingCostOverride ?? null,
+    userSuggestedPrice: userSuggestedPrice ?? null,
     displayPrice: result.displayPrice,
     recommendedPrice: result.recommendedPrice
   });
@@ -336,12 +345,13 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
   const initialInputs = useMemo(() => getDefaultInputs(data), [data]);
   const [inputs, setInputs] = useState<PricingInputs>(initialInputs);
   const [priceFeedback, setPriceFeedback] = useState<number | null>(null);
+  const [userSuggestedPrice, setUserSuggestedPrice] = useState<number | null>(null);
   const [sliderPriceOverride, setSliderPriceOverride] = useState<number | null>(null);
   const [submittedQuoteKeys, setSubmittedQuoteKeys] = useState<string[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const isSubmittingRef = useRef(false);
   const result = useMemo(() => calculatePricing(inputs, data), [inputs, data]);
-  const quoteKey = useMemo(() => createQuoteKey(inputs, result), [inputs, result]);
+  const quoteKey = useMemo(() => createQuoteKey(inputs, result, userSuggestedPrice), [inputs, result, userSuggestedPrice]);
   const hasSubmittedCurrentQuote = priceFeedback !== null && submittedQuoteKeys.includes(quoteKey);
   const campaignOptions = unique([...data.campaigns.map((campaign) => campaign.season), "Workbook baseline"]);
   const formatOptions = inputs.programme === "HKDSE" ? ["Group"] : FORMAT_OPTIONS;
@@ -369,6 +379,7 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
   function resetSimulator() {
     setInputs(initialInputs);
     setPriceFeedback(null);
+    setUserSuggestedPrice(null);
     setSliderPriceOverride(null);
     setSaveStatus("idle");
   }
@@ -380,7 +391,7 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
       isSubmittingRef.current = true;
       setSaveStatus("submitting");
       const savedQuotes = readSavedQuotes();
-      const quoteRecord = buildQuoteRecord(inputs, result, priceFeedback, sliderValue, sliderResult);
+      const quoteRecord = buildQuoteRecord(inputs, result, priceFeedback, userSuggestedPrice, sliderValue, sliderResult);
       const nextQuotes = [...savedQuotes, quoteRecord];
       const nextSubmittedQuoteKeys = [...readSubmittedQuoteKeys(), quoteKey];
       await saveQuoteToSupabase(quoteRecord);
@@ -607,6 +618,19 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
                 <span className="mt-1 block text-xs text-slate-500">{option.detail}</span>
               </button>
             ))}
+          </div>
+          <div className="mt-4 max-w-sm">
+            <NumberField
+              label="User Suggested Price / Hr"
+              min={0}
+              step={10}
+              value={userSuggestedPrice}
+              onChange={(value) => {
+                setUserSuggestedPrice(value);
+                setSaveStatus("idle");
+              }}
+            />
+            <p className="mt-1 text-xs text-slate-500">Optional: capture the hourly rate the user thinks is reasonable.</p>
           </div>
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <div>
