@@ -13,6 +13,7 @@ const QUOTE_STORAGE_KEY = "bliss-pricing-simulator-quotes-v1";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
+const FORMAT_OPTIONS = ["Group", "2:1", "1:1"];
 
 const priceFeedbackOptions = [
   { value: 5, label: "5", detail: "Too high" },
@@ -123,11 +124,12 @@ function unique(values: (string | undefined)[]) {
 function getDefaultInputs(data: WorkbookData): PricingInputs {
   const defaults = data.scenarioDefaults;
   const programme = SYLLABUS_OPTIONS.includes(defaults.programme || "") ? defaults.programme || "IAL" : "IAL";
+  const format = FORMAT_OPTIONS.includes(defaults.format || "") ? defaults.format || "Group" : "Group";
   return {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
     course: programme,
     programme,
-    format: defaults.format || "Group",
+    format,
     teacherTier: defaults.teacherTier || "Core",
     timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
     subjectType: defaults.subjectType || "IAL Science",
@@ -363,7 +365,7 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
               <SelectField label="Campaign" value={inputs.campaignSeason ?? ""} options={campaignOptions} onChange={(value) => update({ campaignSeason: value })} />
               <SelectField label="Syllabus" value={inputs.programme} options={SYLLABUS_OPTIONS} onChange={(value) => update({ course: value, programme: value })} />
-              <SelectField label="Format" value={String(inputs.format)} options={unique(data.priceGrid.map((row) => String(row.format)))} onChange={(value) => update({ format: value })} />
+              <SelectField label="Format" value={String(inputs.format)} options={FORMAT_OPTIONS} onChange={(value) => update({ format: value })} />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">

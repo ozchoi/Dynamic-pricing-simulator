@@ -118,12 +118,20 @@ function tutorHourlyCost(tier: string | undefined) {
   return matchedTier ? TUTOR_HOURLY_COSTS[matchedTier] : TUTOR_HOURLY_COSTS.Core;
 }
 
+function formatCandidates(format: string | undefined) {
+  if (!format) return ["Group", "1"];
+  const normalized = String(format).trim();
+  if (normalized === "Group" || /^[1-6]$/.test(normalized)) return ["Group", "1"];
+  return [normalized];
+}
+
 export function calculatePricing(inputs: PricingInputs, data: WorkbookData): PricingResult {
+  const possibleFormats = formatCandidates(inputs.format);
   const priceRow =
     data.priceGrid.find(
       (row) =>
         row.programme.toLowerCase() === inputs.programme.toLowerCase() &&
-        String(row.format).toLowerCase() === String(inputs.format).toLowerCase()
+        possibleFormats.some((format) => String(row.format).toLowerCase() === format.toLowerCase())
     ) ?? data.priceGrid[0];
 
   const basePrice = priceRow?.basePrice ?? null;

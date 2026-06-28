@@ -7,19 +7,17 @@ import { formatCurrency, formatNumber } from "@/lib/formatting";
 import { PricingInputs, WorkbookData } from "@/lib/types";
 
 const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
-
-function unique(values: (string | undefined)[]) {
-  return Array.from(new Set(values.filter(Boolean) as string[]));
-}
+const FORMAT_OPTIONS = ["Group", "2:1", "1:1"];
 
 function defaultPricingInputs(data: WorkbookData): PricingInputs {
   const defaults = data.scenarioDefaults;
   const programme = SYLLABUS_OPTIONS.includes(defaults.programme || "") ? defaults.programme || "IAL" : "IAL";
+  const format = FORMAT_OPTIONS.includes(defaults.format || "") ? defaults.format || "Group" : "Group";
   return {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
     course: programme,
     programme,
-    format: defaults.format || "Group",
+    format,
     teacherTier: defaults.teacherTier || "Core",
     timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
     subjectType: defaults.subjectType || "IAL Science",
@@ -231,7 +229,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
             <SelectField label="Syllabus" value={programme} options={SYLLABUS_OPTIONS} onChange={applyProgramme} />
-            <SelectField label="Format" value={format} options={unique(data.priceGrid.map((row) => String(row.format)))} onChange={applyFormat} />
+            <SelectField label="Format" value={format} options={FORMAT_OPTIONS} onChange={applyFormat} />
             <NumberField label="Current Students" min={0} value={currentStudents} onChange={setCurrentStudents} />
             <NumberField label="Max Capacity" min={1} value={maxCapacity} onChange={setMaxCapacity} />
             <NumberField label="Expected New Students" min={0} max={seatsAvailable} value={expectedNewStudents} onChange={setExpectedNewStudents} />
