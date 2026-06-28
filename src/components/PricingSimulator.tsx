@@ -1,15 +1,16 @@
 "use client";
 
-import { Check, Download, RotateCcw, TrendingDown, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, Send, RotateCcw, TrendingDown, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { calculatePricing } from "@/lib/calculations";
 import { formatCurrency, formatDecimal, formatNumber, formatPercent } from "@/lib/formatting";
 import { PricingInputs, PricingResult, WorkbookData } from "@/lib/types";
 
 type Tone = "green" | "amber" | "red" | "blue";
-type SaveStatus = "idle" | "saved" | "synced" | "downloaded" | "error";
+type SaveStatus = "idle" | "submitting" | "submitted" | "error";
 
 const QUOTE_STORAGE_KEY = "bliss-pricing-simulator-quotes-v1";
+const SUBMITTED_QUOTE_KEYS_STORAGE_KEY = "bliss-pricing-simulator-submitted-quote-keys-v1";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
@@ -94,6 +95,39 @@ function readSavedQuotes() {
   } catch {
     return [];
   }
+}
+
+function readSubmittedQuoteKeys() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(SUBMITTED_QUOTE_KEYS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function createQuoteKey(inputs: PricingInputs, result: PricingResult) {
+  return JSON.stringify({
+    campaignSeason: inputs.campaignSeason ?? "",
+    syllabus: inputs.programme,
+    format: inputs.format,
+    teacherTier: inputs.teacherTier,
+    timeSlot: inputs.timeSlot,
+    subjectType: inputs.subjectType,
+    source: inputs.source,
+    currentStudents: inputs.currentStudents,
+    maxCapacity: inputs.maxCapacity,
+    priceSensitivity: inputs.priceSensitivity,
+    urgency: inputs.urgency,
+    parentSession: inputs.parentStatus,
+    trialOutcome: inputs.trialOutcome,
+    expectedHoursOverride: inputs.expectedHoursOverride ?? null,
+    priceOverride: inputs.priceOverride ?? null,
+    fixedMarketingCostOverride: inputs.fixedMarketingCostOverride ?? null,
+    displayPrice: result.displayPrice,
+    recommendedPrice: result.recommendedPrice
+  });
 }
 
 async function saveQuoteToSupabase(quote: Record<string, string | number>) {
@@ -286,16 +320,20 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
   const initialInputs = useMemo(() => getDefaultInputs(data), [data]);
   const [inputs, setInputs] = useState<PricingInputs>(initialInputs);
   const [priceFeedback, setPriceFeedback] = useState<number | null>(null);
-  const [savedQuoteCount, setSavedQuoteCount] = useState(0);
+  const [submittedQuoteKeys, setSubmittedQuoteKeys] = useState<string[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const isSubmittingRef = useRef(false);
   const result = useMemo(() => calculatePricing(inputs, data), [inputs, data]);
+  const quoteKey = useMemo(() => createQuoteKey(inputs, result), [inputs, result]);
+  const hasSubmittedCurrentQuote = priceFeedback !== null && submittedQuoteKeys.includes(quoteKey);
   const campaignOptions = unique([...data.campaigns.map((campaign) => campaign.season), "Workbook baseline"]);
+  const formatOptions = inputs.programme === "HKDSE" ? ["Group"] : FORMAT_OPTIONS;
   const netTone = getNetTone(result.expectedNetContribution);
   const priceDelta = result.adjustedBase === null || result.displayPrice === null ? null : result.displayPrice - result.adjustedBase;
   const isOverrideActive = inputs.priceOverride !== null || inputs.expectedHoursOverride !== null || inputs.fixedMarketingCostOverride !== null;
 
   useEffect(() => {
-    setSavedQuoteCount(readSavedQuotes().length);
+    setSubmittedQuoteKeys(readSubmittedQuoteKeys());
   }, []);
 
   function update(patch: Partial<PricingInputs>) {
@@ -309,35 +347,25 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
     setSaveStatus("idle");
   }
 
-  async function confirmQuote() {
-    if (priceFeedback === null) return;
+  async function submitQuote() {
+    if (priceFeedback === null || hasSubmittedCurrentQuote || saveStatus === "submitting" || isSubmittingRef.current) return;
 
     try {
+      isSubmittingRef.current = true;
+      setSaveStatus("submitting");
       const savedQuotes = readSavedQuotes();
       const quoteRecord = buildQuoteRecord(inputs, result, priceFeedback);
       const nextQuotes = [...savedQuotes, quoteRecord];
+      const nextSubmittedQuoteKeys = [...readSubmittedQuoteKeys(), quoteKey];
+      await saveQuoteToSupabase(quoteRecord);
       window.localStorage.setItem(QUOTE_STORAGE_KEY, JSON.stringify(nextQuotes));
-      const syncedToSupabase = await saveQuoteToSupabase(quoteRecord);
-      setSavedQuoteCount(nextQuotes.length);
-      setSaveStatus(syncedToSupabase ? "synced" : "saved");
+      window.localStorage.setItem(SUBMITTED_QUOTE_KEYS_STORAGE_KEY, JSON.stringify(nextSubmittedQuoteKeys));
+      setSubmittedQuoteKeys(nextSubmittedQuoteKeys);
+      setSaveStatus("submitted");
     } catch {
       setSaveStatus("error");
-    }
-  }
-
-  async function downloadSavedQuotes() {
-    const savedQuotes = readSavedQuotes();
-    if (!savedQuotes.length) return;
-
-    try {
-      const XLSX = await import("xlsx");
-      const worksheet = XLSX.utils.json_to_sheet(savedQuotes);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Confirmed Quotes");
-      XLSX.writeFile(workbook, "pricing-simulator-confirmed-quotes.xlsx");
-      setSaveStatus("downloaded");
-    } catch {
-      setSaveStatus("error");
+    } finally {
+      isSubmittingRef.current = false;
     }
   }
 
@@ -364,8 +392,13 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
           <div className="mt-5 space-y-5">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
               <SelectField label="Campaign" value={inputs.campaignSeason ?? ""} options={campaignOptions} onChange={(value) => update({ campaignSeason: value })} />
-              <SelectField label="Syllabus" value={inputs.programme} options={SYLLABUS_OPTIONS} onChange={(value) => update({ course: value, programme: value })} />
-              <SelectField label="Format" value={String(inputs.format)} options={FORMAT_OPTIONS} onChange={(value) => update({ format: value })} />
+              <SelectField
+                label="Syllabus"
+                value={inputs.programme}
+                options={SYLLABUS_OPTIONS}
+                onChange={(value) => update({ course: value, programme: value, format: value === "HKDSE" ? "Group" : inputs.format, maxCapacity: value === "HKDSE" ? 6 : inputs.maxCapacity })}
+              />
+              <SelectField label="Format" value={String(inputs.format)} options={formatOptions} onChange={(value) => update({ format: value })} />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
@@ -526,30 +559,29 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
           </div>
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <div>
-              <p className="text-sm font-medium text-slate-700">Saved quotations: {savedQuoteCount}</p>
-              {saveStatus === "saved" ? <p className="mt-1 text-sm text-green-700">Quotation saved with feedback vote.</p> : null}
-              {saveStatus === "synced" ? <p className="mt-1 text-sm text-green-700">Quotation saved and synced to Supabase.</p> : null}
-              {saveStatus === "downloaded" ? <p className="mt-1 text-sm text-green-700">Spreadsheet downloaded.</p> : null}
-              {saveStatus === "error" ? <p className="mt-1 text-sm text-red-700">Could not save or download this quotation.</p> : null}
+              {hasSubmittedCurrentQuote || saveStatus === "submitted" ? (
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2">
+                  <p className="inline-flex items-center gap-2 text-sm font-semibold text-green-800">
+                    <Check size={16} />
+                    Submitted
+                  </p>
+                  <p className="mt-1 text-xs text-green-700">This quote feedback has already been recorded.</p>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-600">Select one feedback score, then submit once for this quote.</p>
+              )}
+              {saveStatus === "submitting" ? <p className="mt-1 text-sm text-blue-700">Submitting feedback...</p> : null}
+              {saveStatus === "error" ? <p className="mt-1 text-sm text-red-700">Could not submit this feedback. Please try again.</p> : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 className="inline-flex h-10 items-center gap-2 rounded-md bg-blue-700 px-4 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={priceFeedback === null}
-                onClick={confirmQuote}
+                disabled={priceFeedback === null || hasSubmittedCurrentQuote || saveStatus === "submitting"}
+                onClick={submitQuote}
               >
-                <Check size={16} />
-                Confirm
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
-                disabled={savedQuoteCount === 0}
-                onClick={downloadSavedQuotes}
-              >
-                <Download size={16} />
-                Download XLSX
+                {hasSubmittedCurrentQuote || saveStatus === "submitted" ? <Check size={16} /> : <Send size={16} />}
+                {hasSubmittedCurrentQuote || saveStatus === "submitted" ? "Submitted" : saveStatus === "submitting" ? "Submitting" : "Submit"}
               </button>
             </div>
           </div>

@@ -145,6 +145,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
   const [expectedNewStudents, setExpectedNewStudents] = useState(Math.max(0, initialInputs.maxCapacity - initialInputs.currentStudents));
   const [marginalTutorCost, setMarginalTutorCost] = useState(50);
   const [adminCostPerStudent, setAdminCostPerStudent] = useState(120);
+  const formatOptions = programme === "HKDSE" ? ["Group"] : FORMAT_OPTIONS;
 
   function priceForSelection(nextProgramme: string, nextFormat: string) {
     const quote = calculatePricing(
@@ -160,8 +161,13 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
   }
 
   function applyProgramme(nextProgramme: string) {
-    const nextPrice = priceForSelection(nextProgramme, format);
+    const nextFormat = nextProgramme === "HKDSE" ? "Group" : format;
+    const nextPrice = priceForSelection(nextProgramme, nextFormat);
     setProgramme(nextProgramme);
+    if (nextProgramme === "HKDSE") {
+      setFormat("Group");
+      setMaxCapacity(6);
+    }
     setCurrentPrice(nextPrice);
     setDiscountedPrice(Math.round((nextPrice * 0.9) / 10) * 10);
   }
@@ -229,7 +235,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
             <SelectField label="Syllabus" value={programme} options={SYLLABUS_OPTIONS} onChange={applyProgramme} />
-            <SelectField label="Format" value={format} options={FORMAT_OPTIONS} onChange={applyFormat} />
+            <SelectField label="Format" value={format} options={formatOptions} onChange={applyFormat} />
             <NumberField label="Current Students" min={0} value={currentStudents} onChange={setCurrentStudents} />
             <NumberField label="Max Capacity" min={1} value={maxCapacity} onChange={setMaxCapacity} />
             <NumberField label="Expected New Students" min={0} max={seatsAvailable} value={expectedNewStudents} onChange={setExpectedNewStudents} />
