@@ -14,6 +14,16 @@ const EXPECTED_SHEETS = [
   "Sources",
   "README_Update"
 ];
+const DEFAULT_SYLLABUS = "IAL";
+const DEFAULT_FORMAT = "Group";
+const DEFAULT_TEACHER_TIER = "Core";
+const DEFAULT_CURRENT_STUDENTS = 1;
+const DEFAULT_MAX_CAPACITY = 4;
+const REQUIRED_SUBJECT_FACTORS: FactorRow[] = [
+  { label: "IAL Science", factor: 1 },
+  { label: "IAL Maths", factor: 1 },
+  { label: "IAL Humanities", factor: 1 }
+];
 
 function cleanNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -108,6 +118,11 @@ function parseFactors(rows: unknown[][]) {
     capacityFactors.push({ min: 0, band: "Underfilled", factor: 0.95 }, { min: 0.4, band: "Normal", factor: 1 }, { min: 0.85, band: "Near full", factor: 1.08 });
   }
   if (!subjectFactors.length) subjectFactors.push({ label: "Core Sciences", factor: 1 }, { label: "IBDP HL", factor: 1 }, { label: "Other", factor: 1 });
+  for (const required of REQUIRED_SUBJECT_FACTORS) {
+    if (!subjectFactors.some((item) => item.label.toLowerCase() === required.label.toLowerCase())) {
+      subjectFactors.push(required);
+    }
+  }
 
   return { teacherFactors, timeFactors, capacityFactors, subjectFactors };
 }
@@ -191,19 +206,19 @@ function parseScenarioDefaults(workbook: XLSX.WorkBook): Partial<WorkbookData["s
     if (label) defaults[label] = row[1] as string | number;
   }
   return {
-    programme: cleanText(defaults["Programme"]) || "IBDP",
-    subjectType: cleanText(defaults["Subject Type"]) || "IBDP HL",
-    format: cleanText(defaults["Format"]) || "1:1",
-    teacherTier: cleanText(defaults["Teacher Tier"]) || "Senior",
+    programme: DEFAULT_SYLLABUS,
+    subjectType: "IAL Science",
+    format: DEFAULT_FORMAT,
+    teacherTier: DEFAULT_TEACHER_TIER,
     timeSlot: cleanText(defaults["Time Slot"]) || "Weekend 14:00-16:00",
     source: cleanText(defaults["Source"]) || "Referral",
     priceSensitivity: cleanText(defaults["Price Sensitivity"]) || "Medium",
     urgency: cleanText(defaults["Urgency"]) || "High",
-    parentStatus: ["Good", "Normal", "KAM", "Red flag"].includes(cleanText(defaults["Parent Status"])) ? cleanText(defaults["Parent Status"]) : "Normal",
+    parentStatus: ["Easy going", "Normal", "Red Flag"].includes(cleanText(defaults["Parent Status"])) ? cleanText(defaults["Parent Status"]) : "Normal",
     trialOutcome: cleanText(defaults["Trial Outcome"]) || "Not yet",
-    currentStudents: cleanNumber(defaults["Current Students"]) ?? 6,
-    maxCapacity: cleanNumber(defaults["Max Capacity"]) ?? 8,
-    course: "IBDP"
+    currentStudents: DEFAULT_CURRENT_STUDENTS,
+    maxCapacity: DEFAULT_MAX_CAPACITY,
+    course: DEFAULT_SYLLABUS
   };
 }
 

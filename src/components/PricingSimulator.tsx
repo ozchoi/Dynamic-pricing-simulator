@@ -1,12 +1,120 @@
 "use client";
 
-import { RotateCcw, TrendingDown, TrendingUp } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Check, Download, RotateCcw, TrendingDown, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { calculatePricing } from "@/lib/calculations";
 import { formatCurrency, formatDecimal, formatNumber, formatPercent } from "@/lib/formatting";
-import { PricingInputs, WorkbookData } from "@/lib/types";
+import { PricingInputs, PricingResult, WorkbookData } from "@/lib/types";
 
 type Tone = "green" | "amber" | "red" | "blue";
+type SaveStatus = "idle" | "saved" | "synced" | "downloaded" | "error";
+
+const QUOTE_STORAGE_KEY = "bliss-pricing-simulator-quotes-v1";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
+
+const priceFeedbackOptions = [
+  { value: 5, label: "5", detail: "Too high" },
+  { value: 4, label: "4", detail: "Slightly too high" },
+  { value: 3, label: "3", detail: "Neutral" },
+  { value: 2, label: "2", detail: "Slightly too low" },
+  { value: 1, label: "1", detail: "Too low" }
+];
+
+function feedbackLabel(value: number | null) {
+  return priceFeedbackOptions.find((option) => option.value === value)?.detail ?? "";
+}
+
+function numberOrBlank(value: number | null | undefined) {
+  return value ?? "";
+}
+
+function buildQuoteRecord(inputs: PricingInputs, result: PricingResult, priceFeedback: number) {
+  const savedAt = new Date().toISOString();
+
+  return {
+    "Saved At": savedAt,
+    Campaign: inputs.campaignSeason ?? "",
+    Syllabus: inputs.programme,
+    Format: inputs.format,
+    "Teacher Tier": inputs.teacherTier,
+    "Time Slot": inputs.timeSlot,
+    "Subject Type": inputs.subjectType,
+    "Lead Source": inputs.source,
+    "Current Students": inputs.currentStudents,
+    "Max Capacity": inputs.maxCapacity,
+    "Capacity Utilisation": numberOrBlank(result.capacityUtilisation),
+    "Price Sensitivity": inputs.priceSensitivity,
+    Urgency: inputs.urgency,
+    "Parent Session": inputs.parentStatus,
+    "Trial Outcome": inputs.trialOutcome,
+    "Base Price": numberOrBlank(result.basePrice),
+    "Syllabus Adjustment": result.courseAdjustment,
+    "Adjusted Base": numberOrBlank(result.adjustedBase),
+    "Guardrail Min": numberOrBlank(result.minPrice),
+    "Guardrail Max": numberOrBlank(result.maxPrice),
+    "Teacher Factor": result.teacherFactor,
+    "Time Factor": result.timeFactor,
+    "Capacity Factor": result.capacityFactor,
+    "Subject Factor": result.subjectFactor,
+    "Demand Factor": result.courseDemandFactor,
+    "Parent Session Factor": result.parentStatusFactor,
+    "Lead Score": result.leadScore,
+    "Recommended Price / Hr": numberOrBlank(result.recommendedPrice),
+    "Display Price / Hr": numberOrBlank(result.displayPrice),
+    "Recommended Offer": result.recommendedOffer,
+    "Lead To Enrol Probability": numberOrBlank(result.pLeadToEnrol),
+    "8-Lesson Retention Probability": numberOrBlank(result.pRetention8Lessons),
+    "Expected Lessons": result.expectedLessons,
+    "Hours Per Lesson": result.hoursPerLesson,
+    "Expected Hours": numberOrBlank(result.expectedHours),
+    "Expected Revenue": numberOrBlank(result.expectedRevenue),
+    "Tutor Hourly Cost": result.tutorHourlyCost,
+    "Expected Tutor Cost": numberOrBlank(result.expectedTutorCost),
+    "Expected Admin Cost": numberOrBlank(result.expectedAdminCost),
+    "Fixed Marketing Cost": result.fixedMarketingCost,
+    "Expected Total Cost": numberOrBlank(result.expectedTotalCost),
+    "Expected Gross Profit": numberOrBlank(result.expectedGrossProfit),
+    "Expected Net Contribution": numberOrBlank(result.expectedNetContribution),
+    "Billable Hours Override": numberOrBlank(inputs.expectedHoursOverride),
+    "Manual Price / Hr": numberOrBlank(inputs.priceOverride),
+    "Fixed Marketing Cost Override": numberOrBlank(inputs.fixedMarketingCostOverride),
+    "Price Feedback Score": priceFeedback,
+    "Price Feedback Label": feedbackLabel(priceFeedback)
+  };
+}
+
+function readSavedQuotes() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(QUOTE_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string | number>[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveQuoteToSupabase(quote: Record<string, string | number>) {
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return false;
+
+  const response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/pricing_quotes`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal"
+    },
+    body: JSON.stringify({ quote })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase insert failed: ${response.status}`);
+  }
+
+  return true;
+}
 
 function unique(values: (string | undefined)[]) {
   return Array.from(new Set(values.filter(Boolean) as string[]));
@@ -14,21 +122,21 @@ function unique(values: (string | undefined)[]) {
 
 function getDefaultInputs(data: WorkbookData): PricingInputs {
   const defaults = data.scenarioDefaults;
-  const programme = defaults.programme || data.priceGrid[0]?.programme || "IBDP";
+  const programme = SYLLABUS_OPTIONS.includes(defaults.programme || "") ? defaults.programme || "IAL" : "IAL";
   return {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
-    course: defaults.course || programme,
+    course: programme,
     programme,
-    format: defaults.format || data.priceGrid[0]?.format || "1:1",
-    teacherTier: defaults.teacherTier || data.teacherFactors[0]?.label || "Senior",
+    format: defaults.format || "Group",
+    teacherTier: defaults.teacherTier || "Core",
     timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
-    subjectType: defaults.subjectType || data.subjectFactors[0]?.label || "IBDP HL",
+    subjectType: defaults.subjectType || "IAL Science",
     source: defaults.source || data.sourceProbabilities[0]?.source || "Referral",
-    currentStudents: defaults.currentStudents || 6,
-    maxCapacity: defaults.maxCapacity || 8,
+    currentStudents: defaults.currentStudents || 1,
+    maxCapacity: defaults.maxCapacity || 4,
     priceSensitivity: defaults.priceSensitivity || "Medium",
     urgency: defaults.urgency || "High",
-    parentStatus: ["Good", "Normal", "KAM", "Red flag"].includes(defaults.parentStatus || "") ? defaults.parentStatus || "Normal" : "Normal",
+    parentStatus: ["Easy going", "Normal", "Red Flag"].includes(defaults.parentStatus || "") ? defaults.parentStatus || "Normal" : "Normal",
     trialOutcome: defaults.trialOutcome || "Not yet",
     expectedHoursOverride: null,
     priceOverride: null,
@@ -175,15 +283,60 @@ function getNetTone(value: number | null): Tone {
 export function PricingSimulator({ data }: { data: WorkbookData }) {
   const initialInputs = useMemo(() => getDefaultInputs(data), [data]);
   const [inputs, setInputs] = useState<PricingInputs>(initialInputs);
+  const [priceFeedback, setPriceFeedback] = useState<number | null>(null);
+  const [savedQuoteCount, setSavedQuoteCount] = useState(0);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const result = useMemo(() => calculatePricing(inputs, data), [inputs, data]);
-  const courses = unique([...data.courseAdjustments.map((row) => row.course), ...data.priceGrid.map((row) => row.programme), "TKHC"]);
   const campaignOptions = unique([...data.campaigns.map((campaign) => campaign.season), "Workbook baseline"]);
   const netTone = getNetTone(result.expectedNetContribution);
   const priceDelta = result.adjustedBase === null || result.displayPrice === null ? null : result.displayPrice - result.adjustedBase;
   const isOverrideActive = inputs.priceOverride !== null || inputs.expectedHoursOverride !== null || inputs.fixedMarketingCostOverride !== null;
 
+  useEffect(() => {
+    setSavedQuoteCount(readSavedQuotes().length);
+  }, []);
+
   function update(patch: Partial<PricingInputs>) {
     setInputs((current) => ({ ...current, ...patch }));
+    setSaveStatus("idle");
+  }
+
+  function resetSimulator() {
+    setInputs(initialInputs);
+    setPriceFeedback(null);
+    setSaveStatus("idle");
+  }
+
+  async function confirmQuote() {
+    if (priceFeedback === null) return;
+
+    try {
+      const savedQuotes = readSavedQuotes();
+      const quoteRecord = buildQuoteRecord(inputs, result, priceFeedback);
+      const nextQuotes = [...savedQuotes, quoteRecord];
+      window.localStorage.setItem(QUOTE_STORAGE_KEY, JSON.stringify(nextQuotes));
+      const syncedToSupabase = await saveQuoteToSupabase(quoteRecord);
+      setSavedQuoteCount(nextQuotes.length);
+      setSaveStatus(syncedToSupabase ? "synced" : "saved");
+    } catch {
+      setSaveStatus("error");
+    }
+  }
+
+  async function downloadSavedQuotes() {
+    const savedQuotes = readSavedQuotes();
+    if (!savedQuotes.length) return;
+
+    try {
+      const XLSX = await import("xlsx");
+      const worksheet = XLSX.utils.json_to_sheet(savedQuotes);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Confirmed Quotes");
+      XLSX.writeFile(workbook, "pricing-simulator-confirmed-quotes.xlsx");
+      setSaveStatus("downloaded");
+    } catch {
+      setSaveStatus("error");
+    }
   }
 
   return (
@@ -198,7 +351,7 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             <button
               type="button"
               className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              onClick={() => setInputs(initialInputs)}
+              onClick={resetSimulator}
               title="Reset simulator"
             >
               <RotateCcw size={16} />
@@ -209,13 +362,7 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
           <div className="mt-5 space-y-5">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
               <SelectField label="Campaign" value={inputs.campaignSeason ?? ""} options={campaignOptions} onChange={(value) => update({ campaignSeason: value })} />
-              <SelectField
-                label="Course"
-                value={inputs.course}
-                options={courses}
-                onChange={(value) => update({ course: value, programme: value === "TKHC" ? inputs.programme : value })}
-              />
-              <SelectField label="Programme" value={inputs.programme} options={unique(data.priceGrid.map((row) => row.programme))} onChange={(value) => update({ programme: value })} />
+              <SelectField label="Syllabus" value={inputs.programme} options={SYLLABUS_OPTIONS} onChange={(value) => update({ course: value, programme: value })} />
               <SelectField label="Format" value={String(inputs.format)} options={unique(data.priceGrid.map((row) => String(row.format)))} onChange={(value) => update({ format: value })} />
             </div>
 
@@ -238,9 +385,9 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
               <SelectField
-                label="Parent Status"
+                label="Parent Session"
                 value={inputs.parentStatus}
-                options={["Good", "Normal", "KAM", "Red flag"]}
+                options={["Easy going", "Normal", "Red Flag"]}
                 onChange={(value) => update({ parentStatus: value })}
               />
               <SelectField label="Trial Outcome" value={inputs.trialOutcome} options={["Not yet", "Strong", "Medium", "Weak"]} onChange={(value) => update({ trialOutcome: value })} />
@@ -319,14 +466,14 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             <h2 className="text-lg font-semibold text-slate-950">Price Build</h2>
             <div className="mt-2">
               <BreakdownRow label="Base price" value={formatCurrency(result.basePrice)} detail={`${inputs.programme} ${inputs.format}`} />
-              <BreakdownRow label="Course adjustment" value={formatCurrency(result.courseAdjustment)} detail={inputs.course} />
+              <BreakdownRow label="Syllabus adjustment" value={formatCurrency(result.courseAdjustment)} detail={inputs.programme} />
               <BreakdownRow label="Adjusted base" value={formatCurrency(result.adjustedBase)} />
               <BreakdownRow label="Teacher factor" value={formatDecimal(result.teacherFactor)} detail={inputs.teacherTier} />
               <BreakdownRow label="Time slot factor" value={formatDecimal(result.timeFactor)} detail={inputs.timeSlot} />
               <BreakdownRow label="Capacity factor" value={formatDecimal(result.capacityFactor)} detail={formatPercent(result.capacityUtilisation)} />
               <BreakdownRow label="Subject factor" value={formatDecimal(result.subjectFactor)} detail={inputs.subjectType} />
               <BreakdownRow label="Demand factor" value={formatDecimal(result.courseDemandFactor)} />
-              <BreakdownRow label="Parent status factor" value={formatDecimal(result.parentStatusFactor)} detail={inputs.parentStatus} />
+              <BreakdownRow label="Parent session factor" value={formatDecimal(result.parentStatusFactor)} detail={inputs.parentStatus} />
             </div>
           </section>
 
@@ -345,6 +492,66 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             </div>
           </section>
         </div>
+
+        <section className="panel p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">Price Feedback</h2>
+              <p className="mt-1 text-sm text-slate-500">Evaluate whether the recommended price makes sense.</p>
+            </div>
+            {priceFeedback !== null ? (
+              <span className="rounded-md bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-800">
+                Selected {priceFeedback}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-5">
+            {priceFeedbackOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`rounded-md border p-3 text-left transition ${
+                  priceFeedback === option.value
+                    ? "border-blue-500 bg-blue-50 text-blue-950"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/50"
+                }`}
+                onClick={() => setPriceFeedback(option.value)}
+              >
+                <span className="block text-base font-semibold">{option.label}</span>
+                <span className="mt-1 block text-xs text-slate-500">{option.detail}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+            <div>
+              <p className="text-sm font-medium text-slate-700">Saved quotations: {savedQuoteCount}</p>
+              {saveStatus === "saved" ? <p className="mt-1 text-sm text-green-700">Quotation saved with feedback vote.</p> : null}
+              {saveStatus === "synced" ? <p className="mt-1 text-sm text-green-700">Quotation saved and synced to Supabase.</p> : null}
+              {saveStatus === "downloaded" ? <p className="mt-1 text-sm text-green-700">Spreadsheet downloaded.</p> : null}
+              {saveStatus === "error" ? <p className="mt-1 text-sm text-red-700">Could not save or download this quotation.</p> : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="inline-flex h-10 items-center gap-2 rounded-md bg-blue-700 px-4 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                disabled={priceFeedback === null}
+                onClick={confirmQuote}
+              >
+                <Check size={16} />
+                Confirm
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                disabled={savedQuoteCount === 0}
+                onClick={downloadSavedQuotes}
+              >
+                <Download size={16} />
+                Download XLSX
+              </button>
+            </div>
+          </div>
+        </section>
       </section>
     </div>
   );

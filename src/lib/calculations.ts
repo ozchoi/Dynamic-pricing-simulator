@@ -93,7 +93,7 @@ function probabilityForStage(source: SourceProbability | undefined, parentStatus
     retention: DEFAULTS.retentionProbability
   };
 
-  if (["Good", "Normal", "KAM", "Red flag"].includes(parentStatus)) {
+  if (["Easy going", "Normal", "Red Flag"].includes(parentStatus)) {
     if (trialOutcome === "Strong") return Math.min(0.95, p.enrolAfterTrial + 0.12);
     if (trialOutcome === "Weak") return Math.max(0.05, p.enrolAfterTrial - 0.25);
     return p.trialBook * p.trialAttend * p.enrolAfterTrial;
@@ -109,7 +109,7 @@ function probabilityForStage(source: SourceProbability | undefined, parentStatus
 }
 
 function parentStatusFactor(status: string | undefined) {
-  return score({ Good: 0.95, Normal: 1, KAM: 1.1, "Red flag": 1.25 }, status) || 1;
+  return score({ "Easy going": 0.95, Normal: 1, "Red Flag": 1.05 }, status) || 1;
 }
 
 function tutorHourlyCost(tier: string | undefined) {

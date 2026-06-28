@@ -6,27 +6,29 @@ import { calculatePricing } from "@/lib/calculations";
 import { formatCurrency, formatNumber } from "@/lib/formatting";
 import { PricingInputs, WorkbookData } from "@/lib/types";
 
+const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
+
 function unique(values: (string | undefined)[]) {
   return Array.from(new Set(values.filter(Boolean) as string[]));
 }
 
 function defaultPricingInputs(data: WorkbookData): PricingInputs {
   const defaults = data.scenarioDefaults;
-  const programme = defaults.programme || data.priceGrid[0]?.programme || "IBDP";
+  const programme = SYLLABUS_OPTIONS.includes(defaults.programme || "") ? defaults.programme || "IAL" : "IAL";
   return {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
-    course: defaults.course || programme,
+    course: programme,
     programme,
-    format: defaults.format || data.priceGrid[0]?.format || "1:1",
-    teacherTier: defaults.teacherTier || data.teacherFactors[0]?.label || "Senior",
+    format: defaults.format || "Group",
+    teacherTier: defaults.teacherTier || "Core",
     timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
-    subjectType: defaults.subjectType || data.subjectFactors[0]?.label || "IBDP HL",
+    subjectType: defaults.subjectType || "IAL Science",
     source: defaults.source || data.sourceProbabilities[0]?.source || "Referral",
-    currentStudents: defaults.currentStudents || 6,
-    maxCapacity: defaults.maxCapacity || 8,
+    currentStudents: defaults.currentStudents || 1,
+    maxCapacity: defaults.maxCapacity || 4,
     priceSensitivity: defaults.priceSensitivity || "Medium",
     urgency: defaults.urgency || "High",
-    parentStatus: ["Good", "Normal", "KAM", "Red flag"].includes(defaults.parentStatus || "") ? defaults.parentStatus || "Normal" : "Normal",
+    parentStatus: ["Easy going", "Normal", "Red Flag"].includes(defaults.parentStatus || "") ? defaults.parentStatus || "Normal" : "Normal",
     trialOutcome: defaults.trialOutcome || "Not yet",
     expectedHoursOverride: null,
     priceOverride: null
@@ -228,7 +230,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
             </button>
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-            <SelectField label="Programme" value={programme} options={unique(data.priceGrid.map((row) => row.programme))} onChange={applyProgramme} />
+            <SelectField label="Syllabus" value={programme} options={SYLLABUS_OPTIONS} onChange={applyProgramme} />
             <SelectField label="Format" value={format} options={unique(data.priceGrid.map((row) => String(row.format)))} onChange={applyFormat} />
             <NumberField label="Current Students" min={0} value={currentStudents} onChange={setCurrentStudents} />
             <NumberField label="Max Capacity" min={1} value={maxCapacity} onChange={setMaxCapacity} />
