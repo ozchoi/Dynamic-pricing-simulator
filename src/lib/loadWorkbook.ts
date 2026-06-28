@@ -24,6 +24,13 @@ const REQUIRED_SUBJECT_FACTORS: FactorRow[] = [
   { label: "IAL Maths", factor: 1 },
   { label: "IAL Humanities", factor: 1 }
 ];
+const DEFAULT_CAPACITY_FACTORS: WorkbookData["capacityFactors"] = [
+  { min: 0, band: "Underfilled (<40%)", factor: 0.95 },
+  { min: 0.4, band: "Normal (40-70%)", factor: 1 },
+  { min: 0.7, band: "Tight (70-85%)", factor: 1.05 },
+  { min: 0.85, band: "Near full (85-95%)", factor: 1.1 },
+  { min: 0.95, band: "Waitlist / very scarce", factor: 1.15 }
+];
 
 function cleanNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -114,8 +121,11 @@ function parseFactors(rows: unknown[][]) {
     teacherFactors.push({ label: "Core", factor: 1, costPercent: 0.45 }, { label: "Experienced", factor: 1.2, costPercent: 0.5 }, { label: "Senior", factor: 1.3, costPercent: 0.55 });
   }
   if (!timeFactors.length) timeFactors.push({ label: "Peak", factor: 1.1 }, { label: "Standard", factor: 1 }, { label: "Non-peak", factor: 0.9 });
-  if (!capacityFactors.length) {
-    capacityFactors.push({ min: 0, band: "Underfilled", factor: 0.95 }, { min: 0.4, band: "Normal", factor: 1 }, { min: 0.85, band: "Near full", factor: 1.08 });
+  const hasUsefulCapacityFactors = capacityFactors.some((item) => Math.abs(item.factor - 1) > 0.0001);
+  if (!capacityFactors.length || !hasUsefulCapacityFactors) {
+    capacityFactors.splice(0, capacityFactors.length, ...DEFAULT_CAPACITY_FACTORS);
+  } else if (!capacityFactors.some((item) => item.min === 0)) {
+    capacityFactors.unshift(DEFAULT_CAPACITY_FACTORS[0]);
   }
   if (!subjectFactors.length) subjectFactors.push({ label: "Core Sciences", factor: 1 }, { label: "IBDP HL", factor: 1 }, { label: "Other", factor: 1 });
   for (const required of REQUIRED_SUBJECT_FACTORS) {
