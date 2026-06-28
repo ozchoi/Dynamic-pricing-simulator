@@ -203,7 +203,7 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
         (1 + leadScore * DEFAULTS.leadScorePriceAdjustment));
   const guarded = rawPrice === null ? null : Math.max(minPrice ?? rawPrice, Math.min(maxPrice ?? rawPrice, rawPrice));
   const recommendedPrice = guarded === null ? null : roundToNearest(guarded, 10);
-  const displayPrice = recommendedPrice === null ? null : roundToNearest(recommendedPrice, 50);
+  const displayPrice = recommendedPrice;
   const source = data.sourceProbabilities.find((row) => row.source.toLowerCase() === inputs.source.toLowerCase());
   const pLeadToEnrol = probabilityForStage(source, inputs.parentStatus, inputs.trialOutcome);
   const pRetention8Lessons = Math.max(
