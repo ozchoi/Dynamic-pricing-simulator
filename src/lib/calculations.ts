@@ -83,13 +83,6 @@ function roundToNearest(value: number, nearest: number) {
   return Math.round(value / nearest) * nearest;
 }
 
-function roundToSignificantFigures(value: number, figures: number) {
-  if (!value) return 0;
-  const magnitude = Math.floor(Math.log10(Math.abs(value)));
-  const scale = 10 ** (magnitude - figures + 1);
-  return Math.round(value / scale) * scale;
-}
-
 function probabilityForStage(source: SourceProbability | undefined, parentStatus: string, trialOutcome: string) {
   const p = source ?? {
     source: "Default",
@@ -144,10 +137,6 @@ function isHkdseGroup(inputs: PricingInputs) {
   return inputs.programme.toUpperCase() === "HKDSE" && isGroupFormat(inputs.format);
 }
 
-function hkdseCapacityStep(currentStudents: number) {
-  return String(Math.max(1, Math.min(6, Math.ceil(currentStudents || 1))));
-}
-
 function lookupPriceRow(data: WorkbookData, programme: string, formats: string[]) {
   return data.priceGrid.find(
     (row) =>
@@ -156,56 +145,42 @@ function lookupPriceRow(data: WorkbookData, programme: string, formats: string[]
   );
 }
 
-function hkdseCapacityPricing(inputs: PricingInputs, data: WorkbookData) {
+function hkdseLevelKey(level: string | undefined) {
+  return (level || "F.1").replace(".", "").toUpperCase();
+}
+
+function lookupHkdseLevelBaseRow(inputs: PricingInputs, data: WorkbookData) {
   if (!isHkdseGroup(inputs)) return null;
-
-  const capacityStep = Number(hkdseCapacityStep(inputs.currentStudents));
-  const baseRow = lookupPriceRow(data, inputs.programme, ["1"]);
-  const capacityRow = lookupPriceRow(data, inputs.programme, [String(capacityStep)]);
-  const previousCapacityRow = capacityStep > 1 ? lookupPriceRow(data, inputs.programme, [String(capacityStep - 1)]) : null;
-  if (!baseRow || !capacityRow || !baseRow.basePrice) return null;
-
-  const currentTotalRevenue = capacityRow.basePrice * capacityStep;
-  const previousTotalRevenue = previousCapacityRow ? previousCapacityRow.basePrice * (capacityStep - 1) : 0;
-  const marginalPrice = currentTotalRevenue - previousTotalRevenue;
-  const factor = marginalPrice / baseRow.basePrice;
-  const minPrice = baseRow.minPrice === null ? null : roundToSignificantFigures(baseRow.minPrice * factor, 2);
-  const maxPrice = baseRow.maxPrice === null ? null : roundToSignificantFigures(baseRow.maxPrice * factor, 2);
-
-  return {
-    baseRow,
-    capacityRow,
-    factor,
-    minPrice,
-    maxPrice
-  };
+  const key = hkdseLevelKey(inputs.level);
+  return data.priceGrid.find(
+    (row) =>
+      row.programme.toUpperCase() === "HKDSE" &&
+      row.key.toUpperCase() === key &&
+      String(row.format) === "1"
+  ) ?? null;
 }
 
 export function calculatePricing(inputs: PricingInputs, data: WorkbookData): PricingResult {
   const possibleFormats = formatCandidates(inputs.format);
-  const hkdseCapacity = hkdseCapacityPricing(inputs, data);
-  const priceRow = hkdseCapacity?.baseRow ?? lookupPriceRow(data, inputs.programme, possibleFormats) ?? data.priceGrid[0];
+  const hkdseLevelBaseRow = lookupHkdseLevelBaseRow(inputs, data);
+  const priceRow = hkdseLevelBaseRow ?? lookupPriceRow(data, inputs.programme, possibleFormats) ?? data.priceGrid[0];
 
   const basePrice = priceRow?.basePrice ?? null;
   const courseAdjustment = lookupCourseAdjustment(data.courseAdjustments, inputs.course);
   const adjustedBase = basePrice === null ? null : basePrice + courseAdjustment;
-  const minPrice = hkdseCapacity?.minPrice ?? priceRow?.minPrice ?? (basePrice === null ? null : basePrice * 0.85 + courseAdjustment);
+  const minPrice = priceRow?.minPrice ?? (basePrice === null ? null : basePrice * 0.85 + courseAdjustment);
   const maxPrice =
-    hkdseCapacity?.maxPrice ??
     priceRow?.maxPrice ??
-    (hkdseCapacity && basePrice !== null
-      ? roundToSignificantFigures(basePrice * hkdseCapacity.factor * 1.25 + courseAdjustment, 2)
-      : basePrice === null
-        ? null
-        : basePrice * 1.25 + courseAdjustment);
+    (basePrice === null ? null : basePrice * 1.25 + courseAdjustment);
   const capacityUtilisation = isHkdseGroup(inputs) ? divide(inputs.currentStudents, 6) : divide(inputs.currentStudents, inputs.maxCapacity);
   const teacherFactor = lookupFactor(data.teacherFactors, inputs.teacherTier);
   const timeFactor = lookupFactor(data.timeFactors, inputs.timeSlot);
   const capacityFactor =
-    hkdseCapacity?.factor ??
-    (capacityUtilisation === null
+    isHkdseGroup(inputs)
       ? 1
-      : [...data.capacityFactors].reverse().find((row) => capacityUtilisation >= row.min)?.factor ?? 1);
+      : capacityUtilisation === null
+      ? 1
+      : [...data.capacityFactors].reverse().find((row) => capacityUtilisation >= row.min)?.factor ?? 1;
   const subjectFactor = lookupFactor(data.subjectFactors, inputs.subjectType);
   const courseDemandFactor = inputs.course.toUpperCase().includes("TKHC") ? 0.98 : 1;
   const parentFactor = parentStatusFactor(inputs.parentStatus);

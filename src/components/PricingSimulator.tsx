@@ -14,6 +14,7 @@ const SUBMITTED_QUOTE_KEYS_STORAGE_KEY = "bliss-pricing-simulator-submitted-quot
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
+const HKDSE_LEVEL_OPTIONS = ["F.1", "F.2", "F.3", "F.4", "F.5", "F.6"];
 const FORMAT_OPTIONS = ["Group", "2:1", "1:1"];
 
 const priceFeedbackOptions = [
@@ -32,13 +33,14 @@ function numberOrBlank(value: number | null | undefined) {
   return value ?? "";
 }
 
-function buildQuoteRecord(inputs: PricingInputs, result: PricingResult, priceFeedback: number) {
+function buildQuoteRecord(inputs: PricingInputs, result: PricingResult, priceFeedback: number, sliderPrice: number, sliderResult: PricingResult) {
   const savedAt = new Date().toISOString();
 
   return {
     "Saved At": savedAt,
     Campaign: inputs.campaignSeason ?? "",
     Syllabus: inputs.programme,
+    Level: inputs.level ?? "",
     Format: inputs.format,
     "Teacher Tier": inputs.teacherTier,
     "Time Slot": inputs.timeSlot,
@@ -51,7 +53,7 @@ function buildQuoteRecord(inputs: PricingInputs, result: PricingResult, priceFee
     Urgency: inputs.urgency,
     "Parent Session": inputs.parentStatus,
     "Trial Outcome": inputs.trialOutcome,
-    "Base Price": numberOrBlank(result.basePrice),
+    "Base Price / Student / Hr": numberOrBlank(result.basePrice),
     "Syllabus Adjustment": result.courseAdjustment,
     "Adjusted Base": numberOrBlank(result.adjustedBase),
     "Guardrail Min": numberOrBlank(result.minPrice),
@@ -79,6 +81,10 @@ function buildQuoteRecord(inputs: PricingInputs, result: PricingResult, priceFee
     "Expected Total Cost": numberOrBlank(result.expectedTotalCost),
     "Expected Gross Profit": numberOrBlank(result.expectedGrossProfit),
     "Expected Net Contribution": numberOrBlank(result.expectedNetContribution),
+    "Slide Bar Price / Hr": sliderPrice,
+    "Expected Revenue (Slide Bar)": numberOrBlank(sliderResult.expectedRevenue),
+    "Expected Gross Profit (Slide Bar)": numberOrBlank(sliderResult.expectedGrossProfit),
+    "Expected Net Contribution (Slide Bar)": numberOrBlank(sliderResult.expectedNetContribution),
     "Billable Hours Override": numberOrBlank(inputs.expectedHoursOverride),
     "Manual Price / Hr": numberOrBlank(inputs.priceOverride),
     "Fixed Marketing Cost Override": numberOrBlank(inputs.fixedMarketingCostOverride),
@@ -111,6 +117,7 @@ function createQuoteKey(inputs: PricingInputs, result: PricingResult) {
   return JSON.stringify({
     campaignSeason: inputs.campaignSeason ?? "",
     syllabus: inputs.programme,
+    level: inputs.level ?? "",
     format: inputs.format,
     teacherTier: inputs.teacherTier,
     timeSlot: inputs.timeSlot,
@@ -163,6 +170,7 @@ function getDefaultInputs(data: WorkbookData): PricingInputs {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
     course: programme,
     programme,
+    level: defaults.level || "F.1",
     format,
     teacherTier: defaults.teacherTier || "Core",
     timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
@@ -316,10 +324,19 @@ function getNetTone(value: number | null): Tone {
   return "red";
 }
 
+function comparisonText(value: number | null, baseline: number | null) {
+  if (value === null || baseline === null) return "—";
+  const delta = value - baseline;
+  const percent = baseline === 0 ? null : delta / Math.abs(baseline);
+  const sign = delta >= 0 ? "+" : "";
+  return `${sign}${formatCurrency(delta)}${percent === null ? "" : ` (${sign}${formatPercent(percent)})`}`;
+}
+
 export function PricingSimulator({ data }: { data: WorkbookData }) {
   const initialInputs = useMemo(() => getDefaultInputs(data), [data]);
   const [inputs, setInputs] = useState<PricingInputs>(initialInputs);
   const [priceFeedback, setPriceFeedback] = useState<number | null>(null);
+  const [sliderPriceOverride, setSliderPriceOverride] = useState<number | null>(null);
   const [submittedQuoteKeys, setSubmittedQuoteKeys] = useState<string[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const isSubmittingRef = useRef(false);
@@ -331,10 +348,12 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
   const netTone = getNetTone(result.expectedNetContribution);
   const priceDelta = result.adjustedBase === null || result.displayPrice === null ? null : result.displayPrice - result.adjustedBase;
   const isOverrideActive = inputs.priceOverride !== null || inputs.expectedHoursOverride !== null || inputs.fixedMarketingCostOverride !== null;
-  const sliderPrice = inputs.priceOverride ?? result.displayPrice ?? result.recommendedPrice ?? result.adjustedBase ?? 0;
+  const sliderPrice = sliderPriceOverride ?? result.displayPrice ?? result.recommendedPrice ?? result.adjustedBase ?? 0;
   const sliderMin = Math.max(0, Math.round((result.minPrice ?? sliderPrice * 0.7) / 10) * 10);
   const sliderMax = Math.max(sliderMin + 10, Math.round((result.maxPrice ?? sliderPrice * 1.3) / 10) * 10);
   const sliderValue = Math.max(sliderMin, Math.min(sliderMax, sliderPrice));
+  const sliderResult = useMemo(() => calculatePricing({ ...inputs, priceOverride: sliderValue }, data), [inputs, data, sliderValue]);
+  const sliderNetTone = getNetTone(sliderResult.expectedNetContribution);
   const quoteStudentCount = inputs.format === "Group" ? Math.max(1, Math.ceil(inputs.currentStudents || 1)) : 1;
 
   useEffect(() => {
@@ -343,12 +362,14 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
 
   function update(patch: Partial<PricingInputs>) {
     setInputs((current) => ({ ...current, ...patch }));
+    setSliderPriceOverride(null);
     setSaveStatus("idle");
   }
 
   function resetSimulator() {
     setInputs(initialInputs);
     setPriceFeedback(null);
+    setSliderPriceOverride(null);
     setSaveStatus("idle");
   }
 
@@ -359,7 +380,7 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
       isSubmittingRef.current = true;
       setSaveStatus("submitting");
       const savedQuotes = readSavedQuotes();
-      const quoteRecord = buildQuoteRecord(inputs, result, priceFeedback);
+      const quoteRecord = buildQuoteRecord(inputs, result, priceFeedback, sliderValue, sliderResult);
       const nextQuotes = [...savedQuotes, quoteRecord];
       const nextSubmittedQuoteKeys = [...readSubmittedQuoteKeys(), quoteKey];
       await saveQuoteToSupabase(quoteRecord);
@@ -401,8 +422,19 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
                 label="Syllabus"
                 value={inputs.programme}
                 options={SYLLABUS_OPTIONS}
-                onChange={(value) => update({ course: value, programme: value, format: value === "HKDSE" ? "Group" : inputs.format, maxCapacity: value === "HKDSE" ? 6 : inputs.maxCapacity })}
+                onChange={(value) =>
+                  update({
+                    course: value,
+                    programme: value,
+                    level: value === "HKDSE" ? inputs.level || "F.1" : inputs.level,
+                    format: value === "HKDSE" ? "Group" : inputs.format,
+                    maxCapacity: value === "HKDSE" ? 6 : inputs.maxCapacity
+                  })
+                }
               />
+              {inputs.programme === "HKDSE" ? (
+                <SelectField label="Level" value={inputs.level || "F.1"} options={HKDSE_LEVEL_OPTIONS} onChange={(value) => update({ level: value })} />
+              ) : null}
               <SelectField label="Format" value={String(inputs.format)} options={formatOptions} onChange={(value) => update({ format: value })} />
             </div>
 
@@ -472,8 +504,8 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
               </div>
               <div className="mt-5 max-w-2xl rounded-md border border-slate-200 bg-slate-50 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-slate-700">Price sensitivity check</p>
-                  <p className="text-sm font-semibold text-slate-950">{formatCurrency(sliderPrice)} / hr</p>
+                  <p className="text-sm font-semibold text-slate-700">Slide Bar Price Change</p>
+                  <p className="text-sm font-semibold text-slate-950">{formatCurrency(sliderValue)} / hr</p>
                 </div>
                 <input
                   className="mt-3 w-full accent-blue-700"
@@ -482,11 +514,31 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
                   max={sliderMax}
                   step={10}
                   value={sliderValue}
-                  onChange={(event) => update({ priceOverride: Number(event.target.value) })}
+                  onChange={(event) => {
+                    setSliderPriceOverride(Number(event.target.value));
+                    setSaveStatus("idle");
+                  }}
                 />
                 <div className="mt-2 flex justify-between text-xs text-slate-500">
                   <span>{formatCurrency(sliderMin)}</span>
                   <span>{formatCurrency(sliderMax)}</span>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border border-blue-100 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase text-slate-500">Revenue Change</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-950">{comparisonText(sliderResult.expectedRevenue, result.expectedRevenue)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatCurrency(sliderResult.expectedRevenue)}</p>
+                  </div>
+                  <div className="rounded-md border border-blue-100 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase text-slate-500">Gross Profit Change</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-950">{comparisonText(sliderResult.expectedGrossProfit, result.expectedGrossProfit)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatCurrency(sliderResult.expectedGrossProfit)}</p>
+                  </div>
+                  <div className="rounded-md border border-blue-100 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase text-slate-500">Net Contribution Change</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-950">{comparisonText(sliderResult.expectedNetContribution, result.expectedNetContribution)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatCurrency(sliderResult.expectedNetContribution)}</p>
+                  </div>
                 </div>
               </div>
               <p className="mt-3 text-base text-slate-700">{result.recommendedOffer}</p>
@@ -499,6 +551,11 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             <div className={`border-t p-6 lg:border-l lg:border-t-0 ${netTone === "green" ? "bg-green-50" : netTone === "red" ? "bg-red-50" : "bg-amber-50"}`}>
               <p className="text-sm font-semibold text-slate-600">Expected net contribution</p>
               <p className="mt-2 text-3xl font-semibold text-slate-950">{formatCurrency(result.expectedNetContribution)}</p>
+              <div className={`mt-4 rounded-md border p-3 ${sliderNetTone === "green" ? "border-green-200 bg-white/70" : sliderNetTone === "red" ? "border-red-200 bg-white/70" : "border-amber-200 bg-white/70"}`}>
+                <p className="text-xs font-semibold uppercase text-slate-500">Expected net contribution (Change by slide bar)</p>
+                <p className="mt-1 text-xl font-semibold text-slate-950">{formatCurrency(sliderResult.expectedNetContribution)}</p>
+                <p className="mt-1 text-sm text-slate-600">{comparisonText(sliderResult.expectedNetContribution, result.expectedNetContribution)}</p>
+              </div>
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 Includes lead-to-enrol probability, 8-lesson retention, tutor cost, admin cost, and fixed marketing cost.
               </p>
@@ -518,38 +575,8 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
           <Stat label="8-Lesson Retention" value={formatPercent(result.pRetention8Lessons)} />
           <Stat label="Expected Revenue" value={formatCurrency(result.expectedRevenue)} tone="green" />
           <Stat label="Gross Profit" value={formatCurrency(result.expectedGrossProfit)} tone="green" />
-        </div>
-
-        <div className="grid gap-5 lg:grid-cols-2">
-          <section className="panel p-5">
-            <h2 className="text-lg font-semibold text-slate-950">Price Build</h2>
-            <div className="mt-2">
-              <BreakdownRow label="Base price" value={formatCurrency(result.basePrice)} detail={`${inputs.programme} ${inputs.format}`} />
-              <BreakdownRow label="Syllabus adjustment" value={formatCurrency(result.courseAdjustment)} detail={inputs.programme} />
-              <BreakdownRow label="Adjusted base" value={formatCurrency(result.adjustedBase)} />
-              <BreakdownRow label="Teacher factor" value={formatDecimal(result.teacherFactor)} detail={inputs.teacherTier} />
-              <BreakdownRow label="Time slot factor" value={formatDecimal(result.timeFactor)} detail={inputs.timeSlot} />
-              <BreakdownRow label="Capacity factor" value={formatDecimal(result.capacityFactor)} detail={formatPercent(result.capacityUtilisation)} />
-              <BreakdownRow label="Subject factor" value={formatDecimal(result.subjectFactor)} detail={inputs.subjectType} />
-              <BreakdownRow label="Demand factor" value={formatDecimal(result.courseDemandFactor)} />
-              <BreakdownRow label="Parent session factor" value={formatDecimal(result.parentStatusFactor)} detail={inputs.parentStatus} />
-            </div>
-          </section>
-
-          <section className="panel p-5">
-            <h2 className="text-lg font-semibold text-slate-950">Unit Economics</h2>
-            <div className="mt-2">
-              <BreakdownRow label="Recommended price" value={`${formatCurrency(result.recommendedPrice)} / hr`} />
-              <BreakdownRow label="Lesson plan" value={`${formatNumber(result.expectedLessons)} lessons`} detail={`${formatNumber(result.hoursPerLesson)} hours each`} />
-              <BreakdownRow label="Billable hours" value={formatNumber(result.expectedHours)} detail={`2 hours x 8 lessons x ${formatNumber(quoteStudentCount)} student${quoteStudentCount === 1 ? "" : "s"}`} />
-              <BreakdownRow label="Expected revenue" value={formatCurrency(result.expectedRevenue)} detail="Hourly rate x billable student-hours x enrolment x retention" />
-              <BreakdownRow label="Tutor cost" value={formatCurrency(result.expectedTutorCost)} detail={`${formatCurrency(result.tutorHourlyCost)} / teaching hr for ${inputs.teacherTier}`} />
-              <BreakdownRow label="Admin cost" value={formatCurrency(result.expectedAdminCost)} detail="HK$120 per student + HK$30 per retained lesson per student" />
-              <BreakdownRow label="Fixed marketing cost" value={formatCurrency(result.fixedMarketingCost)} />
-              <BreakdownRow label="Total expected cost" value={formatCurrency(result.expectedTotalCost)} />
-              <BreakdownRow label="Expected gross profit" value={formatCurrency(result.expectedGrossProfit)} />
-            </div>
-          </section>
+          <Stat label="Expected Revenue (Slide Bar)" value={formatCurrency(sliderResult.expectedRevenue)} note={comparisonText(sliderResult.expectedRevenue, result.expectedRevenue)} tone="green" />
+          <Stat label="Gross Profit (Slide Bar)" value={formatCurrency(sliderResult.expectedGrossProfit)} note={comparisonText(sliderResult.expectedGrossProfit, result.expectedGrossProfit)} tone="green" />
         </div>
 
         <section className="panel p-5">
@@ -610,6 +637,38 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             </div>
           </div>
         </section>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <section className="panel p-5">
+            <h2 className="text-lg font-semibold text-slate-950">Price Build</h2>
+            <div className="mt-2">
+              <BreakdownRow label="Base price / student / hr" value={formatCurrency(result.basePrice)} detail={`${inputs.programme}${inputs.programme === "HKDSE" ? ` ${inputs.level || "F.1"}` : ""} ${inputs.format}`} />
+              <BreakdownRow label="Syllabus adjustment" value={formatCurrency(result.courseAdjustment)} detail={inputs.programme} />
+              <BreakdownRow label="Adjusted base" value={formatCurrency(result.adjustedBase)} />
+              <BreakdownRow label="Teacher factor" value={formatDecimal(result.teacherFactor)} detail={inputs.teacherTier} />
+              <BreakdownRow label="Time slot factor" value={formatDecimal(result.timeFactor)} detail={inputs.timeSlot} />
+              <BreakdownRow label="Capacity factor" value={formatDecimal(result.capacityFactor)} detail={formatPercent(result.capacityUtilisation)} />
+              <BreakdownRow label="Subject factor" value={formatDecimal(result.subjectFactor)} detail={inputs.subjectType} />
+              <BreakdownRow label="Demand factor" value={formatDecimal(result.courseDemandFactor)} />
+              <BreakdownRow label="Parent session factor" value={formatDecimal(result.parentStatusFactor)} detail={inputs.parentStatus} />
+            </div>
+          </section>
+
+          <section className="panel p-5">
+            <h2 className="text-lg font-semibold text-slate-950">Operating Cost And Profit</h2>
+            <div className="mt-2">
+              <BreakdownRow label="Recommended price" value={`${formatCurrency(result.recommendedPrice)} / hr`} />
+              <BreakdownRow label="Lesson plan" value={`${formatNumber(result.expectedLessons)} lessons`} detail={`${formatNumber(result.hoursPerLesson)} hours each`} />
+              <BreakdownRow label="Billable hours" value={formatNumber(result.expectedHours)} detail={`2 hours x 8 lessons x ${formatNumber(quoteStudentCount)} student${quoteStudentCount === 1 ? "" : "s"}`} />
+              <BreakdownRow label="Expected revenue" value={formatCurrency(result.expectedRevenue)} detail="Hourly rate x billable student-hours x enrolment x retention" />
+              <BreakdownRow label="Tutor cost" value={formatCurrency(result.expectedTutorCost)} detail={`${formatCurrency(result.tutorHourlyCost)} / teaching hr for ${inputs.teacherTier}`} />
+              <BreakdownRow label="Admin cost" value={formatCurrency(result.expectedAdminCost)} detail="HK$120 per student + HK$30 per retained lesson per student" />
+              <BreakdownRow label="Fixed marketing cost" value={formatCurrency(result.fixedMarketingCost)} />
+              <BreakdownRow label="Total expected cost" value={formatCurrency(result.expectedTotalCost)} />
+              <BreakdownRow label="Expected gross profit" value={formatCurrency(result.expectedGrossProfit)} />
+            </div>
+          </section>
+        </div>
       </section>
     </div>
   );

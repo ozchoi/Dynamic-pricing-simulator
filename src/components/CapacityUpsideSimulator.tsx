@@ -7,6 +7,7 @@ import { formatCurrency, formatNumber } from "@/lib/formatting";
 import { PricingInputs, WorkbookData } from "@/lib/types";
 
 const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
+const HKDSE_LEVEL_OPTIONS = ["F.1", "F.2", "F.3", "F.4", "F.5", "F.6"];
 const FORMAT_OPTIONS = ["Group", "2:1", "1:1"];
 
 function defaultPricingInputs(data: WorkbookData): PricingInputs {
@@ -17,6 +18,7 @@ function defaultPricingInputs(data: WorkbookData): PricingInputs {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
     course: programme,
     programme,
+    level: defaults.level || "F.1",
     format,
     teacherTier: defaults.teacherTier || "Core",
     timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
@@ -136,6 +138,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
   const initialInputs = useMemo(() => defaultPricingInputs(data), [data]);
   const currentQuote = useMemo(() => calculatePricing(initialInputs, data), [initialInputs, data]);
   const [programme, setProgramme] = useState(initialInputs.programme);
+  const [level, setLevel] = useState(initialInputs.level || "F.1");
   const [format, setFormat] = useState(String(initialInputs.format));
   const [currentStudents, setCurrentStudents] = useState(initialInputs.currentStudents);
   const [maxCapacity, setMaxCapacity] = useState(initialInputs.maxCapacity);
@@ -147,12 +150,13 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
   const [adminCostPerStudent, setAdminCostPerStudent] = useState(120);
   const formatOptions = programme === "HKDSE" ? ["Group"] : FORMAT_OPTIONS;
 
-  function priceForSelection(nextProgramme: string, nextFormat: string) {
+  function priceForSelection(nextProgramme: string, nextFormat: string, nextLevel = level) {
     const quote = calculatePricing(
       {
         ...initialInputs,
         course: nextProgramme,
         programme: nextProgramme,
+        level: nextLevel,
         format: nextFormat
       },
       data
@@ -166,6 +170,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
     setProgramme(nextProgramme);
     if (nextProgramme === "HKDSE") {
       setFormat("Group");
+      setLevel(level || "F.1");
       setMaxCapacity(6);
     }
     setCurrentPrice(nextPrice);
@@ -175,6 +180,13 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
   function applyFormat(nextFormat: string) {
     const nextPrice = priceForSelection(programme, nextFormat);
     setFormat(nextFormat);
+    setCurrentPrice(nextPrice);
+    setDiscountedPrice(Math.round((nextPrice * 0.9) / 10) * 10);
+  }
+
+  function applyLevel(nextLevel: string) {
+    const nextPrice = priceForSelection(programme, format, nextLevel);
+    setLevel(nextLevel);
     setCurrentPrice(nextPrice);
     setDiscountedPrice(Math.round((nextPrice * 0.9) / 10) * 10);
   }
@@ -203,6 +215,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
 
   function reset() {
     setProgramme(initialInputs.programme);
+    setLevel(initialInputs.level || "F.1");
     setFormat(String(initialInputs.format));
     setCurrentStudents(initialInputs.currentStudents);
     setMaxCapacity(initialInputs.maxCapacity);
@@ -235,6 +248,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
             <SelectField label="Syllabus" value={programme} options={SYLLABUS_OPTIONS} onChange={applyProgramme} />
+            {programme === "HKDSE" ? <SelectField label="Level" value={level} options={HKDSE_LEVEL_OPTIONS} onChange={applyLevel} /> : null}
             <SelectField label="Format" value={format} options={formatOptions} onChange={applyFormat} />
             <NumberField label="Current Students" min={0} value={currentStudents} onChange={setCurrentStudents} />
             <NumberField label="Max Capacity" min={1} value={maxCapacity} onChange={setMaxCapacity} />

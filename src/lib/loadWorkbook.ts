@@ -207,6 +207,7 @@ function parseScenarioDefaults(workbook: XLSX.WorkBook): Partial<WorkbookData["s
   }
   return {
     programme: DEFAULT_SYLLABUS,
+    level: "F.1",
     subjectType: "IAL Science",
     format: DEFAULT_FORMAT,
     teacherTier: DEFAULT_TEACHER_TIER,

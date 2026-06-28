@@ -77,6 +77,7 @@ export type PricingInputs = {
   campaignSeason?: string;
   course: string;
   programme: string;
+  level?: string;
   format: string;
   teacherTier: string;
   timeSlot: string;
