@@ -47,7 +47,7 @@ function buildQuoteRecord(
     "Saved At": savedAt,
     Campaign: inputs.campaignSeason ?? "",
     Syllabus: inputs.programme,
-    Level: inputs.level ?? "",
+    ...(inputs.programme === "HKDSE" ? { Level: inputs.level ?? "F.1" } : {}),
     Format: inputs.format,
     "Teacher Tier": inputs.teacherTier,
     "Time Slot": inputs.timeSlot,
@@ -125,7 +125,7 @@ function createQuoteKey(inputs: PricingInputs, result: PricingResult, userSugges
   return JSON.stringify({
     campaignSeason: inputs.campaignSeason ?? "",
     syllabus: inputs.programme,
-    level: inputs.level ?? "",
+    level: inputs.programme === "HKDSE" ? inputs.level ?? "F.1" : null,
     format: inputs.format,
     teacherTier: inputs.teacherTier,
     timeSlot: inputs.timeSlot,
@@ -179,7 +179,7 @@ function getDefaultInputs(data: WorkbookData): PricingInputs {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
     course: programme,
     programme,
-    level: defaults.level || "F.1",
+    level: programme === "HKDSE" ? defaults.level || "F.1" : undefined,
     format,
     teacherTier: defaults.teacherTier || "Core",
     timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
@@ -437,7 +437,7 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
                   update({
                     course: value,
                     programme: value,
-                    level: value === "HKDSE" ? inputs.level || "F.1" : inputs.level,
+                    level: value === "HKDSE" ? inputs.level || "F.1" : undefined,
                     format: value === "HKDSE" ? "Group" : inputs.format,
                     maxCapacity: value === "HKDSE" ? 6 : inputs.maxCapacity
                   })
