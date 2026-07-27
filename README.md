@@ -50,10 +50,15 @@ Pricing:
 
 ```txt
 adjustedBase = basePrice + courseAdjustment
-recommendedPrice = adjustedBase * teacherFactor * timeFactor * capacityFactor * subjectFactor * courseDemandFactor * leadScoreAdjustment
-expectedRevenue = recommendedPrice * expectedHours * pLeadToEnrol * pRetention8Lessons
-expectedGrossProfit = expectedRevenue * grossMarginAssumption
-expectedNetContribution = expectedGrossProfit - expectedMarketingTrialCost
+rawPrice = adjustedBase * teacherFactor * timeFactor * capacityFactor * subjectFactor * courseDemandFactor * parentSessionFactor * (1 + leadScore * leadScorePriceAdjustment)
+guardedPrice = max(minPrice, min(maxPrice, rawPrice))
+recommendedPrice = guardedPrice rounded to the nearest HK$10
+billableStudentHours = classTeachingHours * billableStudentCount
+expectedRevenue = recommendedPrice * billableStudentHours * pLeadToEnrol * pRetention8Lessons
+expectedTutorCost = tutorHourlyCost * classTeachingHours * pLeadToEnrol * pRetention8Lessons
+expectedAdminCost = 120 * students * pLeadToEnrol + 30 * 8 * students * pLeadToEnrol * pRetention8Lessons
+expectedGrossProfit = expectedRevenue - expectedTutorCost - expectedAdminCost - fixedMarketingCost
+expectedNetContribution = expectedGrossProfit
 ```
 
 All denominator-based calculations return `null` when the denominator is zero or missing, and the UI displays those values as `--`.
@@ -64,11 +69,8 @@ If a course-adjustment sheet provides a TKHC row, the workbook value is used. If
 
 ## Pages
 
-- Executive Summary: management KPIs, campaign charts, funnel view, and data-quality diagnostics.
-- Campaign CAC: sortable campaign table, CAC charts, conversion scatter, and insight cards.
-- Lead Funnel: lead-stage counts, source mix, conversion by source, retention by source, and lead table.
 - Pricing Simulator: interactive quote calculator using workbook assumptions and fallback probabilities.
-- Course Analysis: recommended price and contribution by programme, plus course adjustments.
+- Capacity Upside: contribution bridge for discounting a class to fill unused seats.
 
 ## Business Logic
 

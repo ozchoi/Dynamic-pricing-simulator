@@ -10,20 +10,31 @@ const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
 const HKDSE_LEVEL_OPTIONS = ["F.1", "F.2", "F.3", "F.4", "F.5", "F.6"];
 const FORMAT_OPTIONS = ["Group", "2:1", "1:1"];
 
+function optionOrDefault(value: string | undefined, options: string[], fallback: string) {
+  if (value && options.includes(value)) return value;
+  if (value === "Weekend" && options.includes("Weekend 14:00-16:00")) return "Weekend 14:00-16:00";
+  if (value === "Weekday" && options.includes("Weekday 16:00-18:00")) return "Weekday 16:00-18:00";
+  return options[0] ?? fallback;
+}
+
 function defaultPricingInputs(data: WorkbookData): PricingInputs {
   const defaults = data.scenarioDefaults;
   const programme = SYLLABUS_OPTIONS.includes(defaults.programme || "") ? defaults.programme || "IAL" : "IAL";
   const format = FORMAT_OPTIONS.includes(defaults.format || "") ? defaults.format || "Group" : "Group";
+  const teacherOptions = data.teacherFactors.map((row) => row.label);
+  const timeOptions = data.timeFactors.map((row) => row.label);
+  const subjectOptions = data.subjectFactors.map((row) => row.label);
+  const sourceOptions = data.sourceProbabilities.map((row) => row.source);
   return {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
     course: programme,
     programme,
-    level: defaults.level || "F.1",
+    level: programme === "HKDSE" ? defaults.level || "F.1" : undefined,
     format,
-    teacherTier: defaults.teacherTier || "Core",
-    timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
-    subjectType: defaults.subjectType || "IAL Science",
-    source: defaults.source || data.sourceProbabilities[0]?.source || "Referral",
+    teacherTier: optionOrDefault(defaults.teacherTier, teacherOptions, "Core"),
+    timeSlot: optionOrDefault(defaults.timeSlot, timeOptions, "Weekend 14:00-16:00"),
+    subjectType: optionOrDefault(defaults.subjectType, subjectOptions, "IAL Science"),
+    source: optionOrDefault(defaults.source, sourceOptions, "Referral"),
     currentStudents: defaults.currentStudents || 1,
     maxCapacity: defaults.maxCapacity || 4,
     priceSensitivity: defaults.priceSensitivity || "Medium",
@@ -31,7 +42,8 @@ function defaultPricingInputs(data: WorkbookData): PricingInputs {
     parentStatus: ["Easy going", "Normal", "Red Flag"].includes(defaults.parentStatus || "") ? defaults.parentStatus || "Normal" : "Normal",
     trialOutcome: defaults.trialOutcome || "Not yet",
     expectedHoursOverride: null,
-    priceOverride: null
+    priceOverride: null,
+    fixedMarketingCostOverride: null
   };
 }
 
@@ -156,7 +168,7 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
         ...initialInputs,
         course: nextProgramme,
         programme: nextProgramme,
-        level: nextLevel,
+        level: nextProgramme === "HKDSE" ? nextLevel : undefined,
         format: nextFormat
       },
       data
@@ -172,6 +184,8 @@ export function CapacityUpsideSimulator({ data }: { data: WorkbookData }) {
       setFormat("Group");
       setLevel(level || "F.1");
       setMaxCapacity(6);
+    } else {
+      setMaxCapacity(initialInputs.maxCapacity || 4);
     }
     setCurrentPrice(nextPrice);
     setDiscountedPrice(Math.round((nextPrice * 0.9) / 10) * 10);

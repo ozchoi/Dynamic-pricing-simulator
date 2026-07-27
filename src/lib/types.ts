@@ -108,6 +108,8 @@ export type PricingResult = {
   courseDemandFactor: number;
   parentStatusFactor: number;
   leadScore: number;
+  rawPrice: number | null;
+  guardedPrice: number | null;
   recommendedPrice: number | null;
   displayPrice: number | null;
   recommendedOffer: string;
@@ -115,6 +117,7 @@ export type PricingResult = {
   pRetention8Lessons: number | null;
   expectedLessons: number;
   hoursPerLesson: number;
+  classTeachingHours: number | null;
   expectedHours: number | null;
   expectedRevenue: number | null;
   tutorHourlyCost: number;

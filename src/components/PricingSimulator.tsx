@@ -4,6 +4,7 @@ import { Check, Send, RotateCcw, TrendingDown, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { calculatePricing } from "@/lib/calculations";
 import { formatCurrency, formatDecimal, formatNumber, formatPercent } from "@/lib/formatting";
+import { buildQuoteRecord, createQuoteKey, priceFeedbackOptions } from "@/lib/quoteRecords";
 import { PricingInputs, PricingResult, WorkbookData } from "@/lib/types";
 
 type Tone = "green" | "amber" | "red" | "blue";
@@ -16,90 +17,6 @@ const SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KE
 const SYLLABUS_OPTIONS = ["IAL", "IGCSE", "IBDP", "HKDSE"];
 const HKDSE_LEVEL_OPTIONS = ["F.1", "F.2", "F.3", "F.4", "F.5", "F.6"];
 const FORMAT_OPTIONS = ["Group", "2:1", "1:1"];
-
-const priceFeedbackOptions = [
-  { value: 5, label: "5", detail: "Too high" },
-  { value: 4, label: "4", detail: "Slightly too high" },
-  { value: 3, label: "3", detail: "Neutral" },
-  { value: 2, label: "2", detail: "Slightly too low" },
-  { value: 1, label: "1", detail: "Too low" }
-];
-
-function feedbackLabel(value: number | null) {
-  return priceFeedbackOptions.find((option) => option.value === value)?.detail ?? "";
-}
-
-function numberOrBlank(value: number | null | undefined) {
-  return value ?? "";
-}
-
-function buildQuoteRecord(
-  inputs: PricingInputs,
-  result: PricingResult,
-  priceFeedback: number,
-  userSuggestedPrice: number | null,
-  sliderPrice: number,
-  sliderResult: PricingResult
-) {
-  const savedAt = new Date().toISOString();
-
-  return {
-    "Saved At": savedAt,
-    Campaign: inputs.campaignSeason ?? "",
-    Syllabus: inputs.programme,
-    ...(inputs.programme === "HKDSE" ? { Level: inputs.level ?? "F.1" } : {}),
-    Format: inputs.format,
-    "Teacher Tier": inputs.teacherTier,
-    "Time Slot": inputs.timeSlot,
-    "Subject Type": inputs.subjectType,
-    "Lead Source": inputs.source,
-    "Current Students": inputs.currentStudents,
-    "Max Capacity": inputs.maxCapacity,
-    "Capacity Utilisation": numberOrBlank(result.capacityUtilisation),
-    "Price Sensitivity": inputs.priceSensitivity,
-    Urgency: inputs.urgency,
-    "Parent Session": inputs.parentStatus,
-    "Trial Outcome": inputs.trialOutcome,
-    "Base Price / Student / Hr": numberOrBlank(result.basePrice),
-    "Syllabus Adjustment": result.courseAdjustment,
-    "Adjusted Base": numberOrBlank(result.adjustedBase),
-    "Guardrail Min": numberOrBlank(result.minPrice),
-    "Guardrail Max": numberOrBlank(result.maxPrice),
-    "Teacher Factor": result.teacherFactor,
-    "Time Factor": result.timeFactor,
-    "Capacity Factor": result.capacityFactor,
-    "Subject Factor": result.subjectFactor,
-    "Demand Factor": result.courseDemandFactor,
-    "Parent Session Factor": result.parentStatusFactor,
-    "Lead Score": result.leadScore,
-    "Recommended Price / Hr": numberOrBlank(result.recommendedPrice),
-    "Display Price / Hr": numberOrBlank(result.displayPrice),
-    "Recommended Offer": result.recommendedOffer,
-    "Lead To Enrol Probability": numberOrBlank(result.pLeadToEnrol),
-    "8-Lesson Retention Probability": numberOrBlank(result.pRetention8Lessons),
-    "Expected Lessons": result.expectedLessons,
-    "Hours Per Lesson": result.hoursPerLesson,
-    "Expected Hours": numberOrBlank(result.expectedHours),
-    "Expected Revenue": numberOrBlank(result.expectedRevenue),
-    "Tutor Hourly Cost": result.tutorHourlyCost,
-    "Expected Tutor Cost": numberOrBlank(result.expectedTutorCost),
-    "Expected Admin Cost": numberOrBlank(result.expectedAdminCost),
-    "Fixed Marketing Cost": result.fixedMarketingCost,
-    "Expected Total Cost": numberOrBlank(result.expectedTotalCost),
-    "Expected Gross Profit": numberOrBlank(result.expectedGrossProfit),
-    "Expected Net Contribution": numberOrBlank(result.expectedNetContribution),
-    "Slide Bar Price / Hr": sliderPrice,
-    "Expected Revenue (Slide Bar)": numberOrBlank(sliderResult.expectedRevenue),
-    "Expected Gross Profit (Slide Bar)": numberOrBlank(sliderResult.expectedGrossProfit),
-    "Expected Net Contribution (Slide Bar)": numberOrBlank(sliderResult.expectedNetContribution),
-    "Billable Hours Override": numberOrBlank(inputs.expectedHoursOverride),
-    "Manual Price / Hr": numberOrBlank(inputs.priceOverride),
-    "Fixed Marketing Cost Override": numberOrBlank(inputs.fixedMarketingCostOverride),
-    "Price Feedback Score": priceFeedback,
-    "Price Feedback Label": feedbackLabel(priceFeedback),
-    "User Suggested Price / Hr": numberOrBlank(userSuggestedPrice)
-  };
-}
 
 function readSavedQuotes() {
   if (typeof window === "undefined") return [];
@@ -121,33 +38,10 @@ function readSubmittedQuoteKeys() {
   }
 }
 
-function createQuoteKey(inputs: PricingInputs, result: PricingResult, userSuggestedPrice: number | null) {
-  return JSON.stringify({
-    campaignSeason: inputs.campaignSeason ?? "",
-    syllabus: inputs.programme,
-    level: inputs.programme === "HKDSE" ? inputs.level ?? "F.1" : null,
-    format: inputs.format,
-    teacherTier: inputs.teacherTier,
-    timeSlot: inputs.timeSlot,
-    subjectType: inputs.subjectType,
-    source: inputs.source,
-    currentStudents: inputs.currentStudents,
-    maxCapacity: inputs.maxCapacity,
-    priceSensitivity: inputs.priceSensitivity,
-    urgency: inputs.urgency,
-    parentSession: inputs.parentStatus,
-    trialOutcome: inputs.trialOutcome,
-    expectedHoursOverride: inputs.expectedHoursOverride ?? null,
-    priceOverride: inputs.priceOverride ?? null,
-    fixedMarketingCostOverride: inputs.fixedMarketingCostOverride ?? null,
-    userSuggestedPrice: userSuggestedPrice ?? null,
-    displayPrice: result.displayPrice,
-    recommendedPrice: result.recommendedPrice
-  });
-}
-
 async function saveQuoteToSupabase(quote: Record<string, string | number>) {
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return false;
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+    throw new Error("Supabase quote persistence is not configured.");
+  }
 
   const response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/pricing_quotes`, {
     method: "POST",
@@ -171,20 +65,31 @@ function unique(values: (string | undefined)[]) {
   return Array.from(new Set(values.filter(Boolean) as string[]));
 }
 
+function optionOrDefault(value: string | undefined, options: string[], fallback: string) {
+  if (value && options.includes(value)) return value;
+  if (value === "Weekend" && options.includes("Weekend 14:00-16:00")) return "Weekend 14:00-16:00";
+  if (value === "Weekday" && options.includes("Weekday 16:00-18:00")) return "Weekday 16:00-18:00";
+  return options[0] ?? fallback;
+}
+
 function getDefaultInputs(data: WorkbookData): PricingInputs {
   const defaults = data.scenarioDefaults;
   const programme = SYLLABUS_OPTIONS.includes(defaults.programme || "") ? defaults.programme || "IAL" : "IAL";
   const format = FORMAT_OPTIONS.includes(defaults.format || "") ? defaults.format || "Group" : "Group";
+  const teacherOptions = data.teacherFactors.map((row) => row.label);
+  const timeOptions = data.timeFactors.map((row) => row.label);
+  const subjectOptions = data.subjectFactors.map((row) => row.label);
+  const sourceOptions = data.sourceProbabilities.map((row) => row.source);
   return {
     campaignSeason: data.campaigns[0]?.season || "Workbook baseline",
     course: programme,
     programme,
     level: programme === "HKDSE" ? defaults.level || "F.1" : undefined,
     format,
-    teacherTier: defaults.teacherTier || "Core",
-    timeSlot: defaults.timeSlot || data.timeFactors[0]?.label || "Weekend 14:00-16:00",
-    subjectType: defaults.subjectType || "IAL Science",
-    source: defaults.source || data.sourceProbabilities[0]?.source || "Referral",
+    teacherTier: optionOrDefault(defaults.teacherTier, teacherOptions, "Core"),
+    timeSlot: optionOrDefault(defaults.timeSlot, timeOptions, "Weekend 14:00-16:00"),
+    subjectType: optionOrDefault(defaults.subjectType, subjectOptions, "IAL Science"),
+    source: optionOrDefault(defaults.source, sourceOptions, "Referral"),
     currentStudents: defaults.currentStudents || 1,
     maxCapacity: defaults.maxCapacity || 4,
     priceSensitivity: defaults.priceSensitivity || "Medium",
@@ -491,7 +396,7 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             ) : null}
           </div>
           <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-            <NumberField label="Billable Hours Override" min={0} value={inputs.expectedHoursOverride} onChange={(value) => update({ expectedHoursOverride: value })} />
+            <NumberField label="Teaching Hours Override" min={0} value={inputs.expectedHoursOverride} onChange={(value) => update({ expectedHoursOverride: value })} />
             <NumberField label="Manual Price / Hr" min={0} step={10} value={inputs.priceOverride} onChange={(value) => update({ priceOverride: value })} />
             <NumberField label="Fixed Marketing Cost" min={0} step={100} value={inputs.fixedMarketingCostOverride} onChange={(value) => update({ fixedMarketingCostOverride: value })} />
           </div>
@@ -683,7 +588,8 @@ export function PricingSimulator({ data }: { data: WorkbookData }) {
             <div className="mt-2">
               <BreakdownRow label="Recommended price" value={`${formatCurrency(result.recommendedPrice)} / hr`} />
               <BreakdownRow label="Lesson plan" value={`${formatNumber(result.expectedLessons)} lessons`} detail={`${formatNumber(result.hoursPerLesson)} hours each`} />
-              <BreakdownRow label="Billable hours" value={formatNumber(result.expectedHours)} detail={`2 hours x 8 lessons x ${formatNumber(quoteStudentCount)} student${quoteStudentCount === 1 ? "" : "s"}`} />
+              <BreakdownRow label="Class teaching hours" value={formatNumber(result.classTeachingHours)} detail="Teaching hours before student count" />
+              <BreakdownRow label="Billable student-hours" value={formatNumber(result.expectedHours)} detail={`2 hours x 8 lessons x ${formatNumber(quoteStudentCount)} student${quoteStudentCount === 1 ? "" : "s"}`} />
               <BreakdownRow label="Expected revenue" value={formatCurrency(result.expectedRevenue)} detail="Hourly rate x billable student-hours x enrolment x retention" />
               <BreakdownRow label="Tutor cost" value={formatCurrency(result.expectedTutorCost)} detail={`${formatCurrency(result.tutorHourlyCost)} / teaching hr for ${inputs.teacherTier}`} />
               <BreakdownRow label="Admin cost" value={formatCurrency(result.expectedAdminCost)} detail="HK$120 per student + HK$30 per retained lesson per student" />

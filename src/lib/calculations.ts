@@ -145,6 +145,13 @@ function lookupPriceRow(data: WorkbookData, programme: string, formats: string[]
   );
 }
 
+function lookupCapacityFactor(data: WorkbookData, utilisation: number | null) {
+  if (utilisation === null) return 1;
+  return [...data.capacityFactors]
+    .sort((a, b) => b.min - a.min)
+    .find((row) => utilisation >= row.min)?.factor ?? 1;
+}
+
 function hkdseLevelKey(level: string | undefined) {
   return (level || "F.1").replace(".", "").toUpperCase();
 }
@@ -163,7 +170,7 @@ function lookupHkdseLevelBaseRow(inputs: PricingInputs, data: WorkbookData) {
 export function calculatePricing(inputs: PricingInputs, data: WorkbookData): PricingResult {
   const possibleFormats = formatCandidates(inputs.format);
   const hkdseLevelBaseRow = lookupHkdseLevelBaseRow(inputs, data);
-  const priceRow = hkdseLevelBaseRow ?? lookupPriceRow(data, inputs.programme, possibleFormats) ?? data.priceGrid[0];
+  const priceRow = hkdseLevelBaseRow ?? lookupPriceRow(data, inputs.programme, possibleFormats) ?? null;
 
   const basePrice = priceRow?.basePrice ?? null;
   const courseAdjustment = lookupCourseAdjustment(data.courseAdjustments, inputs.course);
@@ -175,12 +182,7 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
   const capacityUtilisation = isHkdseGroup(inputs) ? divide(inputs.currentStudents, 6) : divide(inputs.currentStudents, inputs.maxCapacity);
   const teacherFactor = lookupFactor(data.teacherFactors, inputs.teacherTier);
   const timeFactor = lookupFactor(data.timeFactors, inputs.timeSlot);
-  const capacityFactor =
-    isHkdseGroup(inputs)
-      ? 1
-      : capacityUtilisation === null
-      ? 1
-      : [...data.capacityFactors].reverse().find((row) => capacityUtilisation >= row.min)?.factor ?? 1;
+  const capacityFactor = lookupCapacityFactor(data, capacityUtilisation);
   const subjectFactor = lookupFactor(data.subjectFactors, inputs.subjectType);
   const courseDemandFactor = inputs.course.toUpperCase().includes("TKHC") ? 0.98 : 1;
   const parentFactor = parentStatusFactor(inputs.parentStatus);
@@ -201,8 +203,8 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
         courseDemandFactor *
         parentFactor *
         (1 + leadScore * DEFAULTS.leadScorePriceAdjustment));
-  const guarded = rawPrice === null ? null : Math.max(minPrice ?? rawPrice, Math.min(maxPrice ?? rawPrice, rawPrice));
-  const recommendedPrice = guarded === null ? null : roundToNearest(guarded, 10);
+  const guardedPrice = rawPrice === null ? null : Math.max(minPrice ?? rawPrice, Math.min(maxPrice ?? rawPrice, rawPrice));
+  const recommendedPrice = guardedPrice === null ? null : roundToNearest(guardedPrice, 10);
   const displayPrice = recommendedPrice;
   const source = data.sourceProbabilities.find((row) => row.source.toLowerCase() === inputs.source.toLowerCase());
   const pLeadToEnrol = probabilityForStage(source, inputs.parentStatus, inputs.trialOutcome);
@@ -237,6 +239,7 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
   const expectedMarketingTrialCost = fixedMarketingCost;
   const expectedNetContribution = expectedGrossProfit;
   const warnings = [
+    !priceRow ? `No price-grid row found for ${inputs.programme} / ${inputs.format}; quote is unavailable.` : "",
     capacityUtilisation !== null && capacityUtilisation > 0.85 ? "Capacity utilisation is above 85%." : "",
     rawPrice !== null && minPrice !== null && rawPrice < minPrice ? "Calculated price is below guardrail." : "",
     !source ? "Source probability is missing; fallback probabilities are in use." : ""
@@ -263,6 +266,8 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
     courseDemandFactor,
     parentStatusFactor: parentFactor,
     leadScore,
+    rawPrice,
+    guardedPrice,
     recommendedPrice,
     displayPrice,
     recommendedOffer,
@@ -270,6 +275,7 @@ export function calculatePricing(inputs: PricingInputs, data: WorkbookData): Pri
     pRetention8Lessons,
     expectedLessons,
     hoursPerLesson,
+    classTeachingHours,
     expectedHours,
     expectedRevenue,
     tutorHourlyCost: classTutorHourlyCost,
